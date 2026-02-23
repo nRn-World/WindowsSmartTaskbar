@@ -26,4 +26,5 @@ publish_output/
 publish_selfcontained/
 publish_small/
 publish_new/
+publish_release/
 *.zip

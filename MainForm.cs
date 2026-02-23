@@ -44,6 +44,36 @@ namespace WindowsSmartTaskbar
 
         // Selection tracking
         private HashSet<int> selectedIndices = new HashSet<int>();
+        
+        // Drag and Drop
+        private ProgramItem? draggedItem;
+        private Point dragStartPoint;
+
+        public List<ProgramItem> GetPrograms() => programs;
+        public List<Category> GetCategories() => categories;
+        
+        public void SetProgramCategory(ProgramItem program, string category)
+        {
+            program.Category = category;
+            SavePrograms();
+            RefreshProgramList();
+        }
+
+        public void MoveProgram(ProgramItem source, ProgramItem target)
+        {
+            if (source == target) return;
+
+            int oldIndex = programs.IndexOf(source);
+            int newIndex = programs.IndexOf(target);
+
+            if (oldIndex >= 0 && newIndex >= 0)
+            {
+                programs.RemoveAt(oldIndex);
+                programs.Insert(newIndex, source);
+                SavePrograms();
+                RefreshProgramList();
+            }
+        }
 
         // Localization
         private string currentLanguage = "en";
@@ -434,36 +464,29 @@ namespace WindowsSmartTaskbar
 
             notifyIcon.ContextMenuStrip = contextMenu;
 
-            // Använd systemets dubbelklick-hastighet + en liten marginal
-            clickTimer = new System.Windows.Forms.Timer { Interval = SystemInformation.DoubleClickTime + 100 };
+            clickTimer = new System.Windows.Forms.Timer();
+            clickTimer.Interval = SystemInformation.DoubleClickTime;
             clickTimer.Tick += (s, e) =>
             {
                 clickTimer.Stop();
-                // Om vi nyss dubbelklickade, strunta i menyn helt
-                if ((DateTime.Now - lastDoubleClickTime).TotalMilliseconds < 1000)
-                    return;
-
                 BuildQuickLaunchMenu();
-                SetForegroundWindow(this.Handle);
-                leftClickMenu?.Show(Control.MousePosition);
+                SetForegroundWindow(this.Handle); // Ensure focus for menu
+                leftClickMenu?.Show(Cursor.Position);
             };
 
             notifyIcon.MouseClick += (s, e) => 
             { 
                 if (e.Button == MouseButtons.Left) 
                 {
-                    clickTimer.Stop();
                     clickTimer.Start();
                 }
             };
+            
             notifyIcon.MouseDoubleClick += (s, e) => 
             { 
                 if (e.Button == MouseButtons.Left) 
                 {
-                    lastDoubleClickTime = DateTime.Now;
                     clickTimer.Stop();
-                    leftClickMenu?.Hide();
-                    leftClickMenu?.Close();
                     ShowProgramList(); 
                 }
             };
@@ -482,10 +505,11 @@ namespace WindowsSmartTaskbar
 
             foreach (var cat in categories)
             {
-                var catItem = new ToolStripMenuItem(cat.Name);
+                var displayName = cat.Name == DefaultCategory ? T("allPrograms") : cat.Name;
+                var catItem = new ToolStripMenuItem(displayName);
                 
                 var categoryPrograms = programs.Where(p => p.Category == cat.Name).ToList();
-                if (cat.Name == "Alla program")
+                if (cat.Name == DefaultCategory)
                 {
                     categoryPrograms = programs.ToList();
                 }
@@ -501,7 +525,7 @@ namespace WindowsSmartTaskbar
                     catItem.DropDownItems.Add(progItem);
                 }
 
-                if (catItem.DropDownItems.Count > 0 || cat.Name == "Alla program")
+                if (catItem.DropDownItems.Count > 0 || cat.Name == DefaultCategory)
                 {
                     leftClickMenu.Items.Add(catItem);
                 }
@@ -892,6 +916,59 @@ namespace WindowsSmartTaskbar
             addHover(iconBox);
             addHover(nameLabel);
             addHover(pathLabel);
+
+            // Drag & Drop
+            row.AllowDrop = true;
+            
+            MouseEventHandler mouseDown = (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    draggedItem = program;
+                    dragStartPoint = e.Location;
+                }
+            };
+
+            MouseEventHandler mouseMove = (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left && draggedItem != null)
+                {
+                    if (Math.Abs(e.X - dragStartPoint.X) > 5 || Math.Abs(e.Y - dragStartPoint.Y) > 5)
+                    {
+                        row.DoDragDrop(draggedItem, DragDropEffects.Move);
+                    }
+                }
+            };
+
+            DragEventHandler dragEnter = (s, e) =>
+            {
+                if (e.Data != null && e.Data.GetDataPresent(typeof(ProgramItem)))
+                {
+                    e.Effect = DragDropEffects.Move;
+                }
+            };
+
+            DragEventHandler dragDrop = (s, e) =>
+            {
+                if (e.Data == null) return;
+                var source = e.Data.GetData(typeof(ProgramItem)) as ProgramItem;
+                if (source != null && source != program)
+                {
+                    MoveProgram(source, program);
+                    draggedItem = null;
+                }
+            };
+
+            // Attach drag events
+            Control[] dragControls = { row, iconBox, nameLabel, pathLabel };
+            foreach (var c in dragControls)
+            {
+                c.MouseDown += mouseDown;
+                c.MouseMove += mouseMove;
+            }
+            
+            row.DragEnter += dragEnter;
+            row.DragDrop += dragDrop;
 
             return row;
         }

@@ -9,6 +9,7 @@
     <Title>WindowsSmartTaskbar</Title>
     <AssemblyTitle>WindowsSmartTaskbar</AssemblyTitle>
     <Description>En smart taskbar för att hantera och starta Windows-program</Description>
+    <GenerateMSBuildEditorConfig>false</GenerateMSBuildEditorConfig>
   </PropertyGroup>
 
   <ItemGroup>
