@@ -25,7 +25,7 @@ namespace WindowsSmartTaskbar
         private NotifyIcon? notifyIcon;
         private ContextMenuStrip? contextMenu;
         private ContextMenuStrip? leftClickMenu;
-        private Timer? clickTimer;
+        private System.Windows.Forms.Timer? clickTimer;
         private DateTime lastDoubleClickTime = DateTime.MinValue;
 
         // UI controls
@@ -392,7 +392,7 @@ namespace WindowsSmartTaskbar
             notifyIcon.ContextMenuStrip = contextMenu;
 
             // Använd systemets dubbelklick-hastighet + en liten marginal
-            clickTimer = new Timer { Interval = SystemInformation.DoubleClickTime + 100 };
+            clickTimer = new System.Windows.Forms.Timer { Interval = SystemInformation.DoubleClickTime + 100 };
             clickTimer.Tick += (s, e) =>
             {
                 clickTimer.Stop();
@@ -589,8 +589,11 @@ namespace WindowsSmartTaskbar
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
                 {
                     if (key == null) return false;
-                    var value = key.GetValue("WindowsSmartTaskbar");
-                    return value != null && value.ToString() == Application.ExecutablePath;
+                    var value = key.GetValue("WindowsSmartTaskbar")?.ToString();
+                    if (string.IsNullOrEmpty(value)) return false;
+                    
+                    var currentPath = Environment.ProcessPath ?? Application.ExecutablePath;
+                    return value == currentPath || value == $"\"{currentPath}\"";
                 }
             }
             catch { return false; }
@@ -604,9 +607,14 @@ namespace WindowsSmartTaskbar
                 {
                     if (key == null) return;
                     if (enable)
-                        key.SetValue("WindowsSmartTaskbar", Application.ExecutablePath);
+                    {
+                        var currentPath = Environment.ProcessPath ?? Application.ExecutablePath;
+                        key.SetValue("WindowsSmartTaskbar", $"\"{currentPath}\"");
+                    }
                     else
+                    {
                         key.DeleteValue("WindowsSmartTaskbar", false);
+                    }
                 }
             }
             catch (Exception ex)
