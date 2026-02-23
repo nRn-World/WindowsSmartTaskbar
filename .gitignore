@@ -1,0 +1,21 @@
+# .gitignore for .NET
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+
+# User-specific files
+.vs/
+.idea/
+.vscode/
+
+# Build logs
+*.log
+build_output.txt
+build_err.txt
+
+# Application data
+programs.json
+categories.json
+settings.json
