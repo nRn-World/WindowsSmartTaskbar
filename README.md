@@ -64,8 +64,6 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
----
-
 ## 👨‍💻 Author
 
 **Created 2026 by © nRn World**
