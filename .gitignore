@@ -14,8 +14,16 @@ obj/
 *.log
 build_output.txt
 build_err.txt
+build_*.txt
 
 # Application data
 programs.json
 categories.json
 settings.json
+
+# Build outputs
+publish_output/
+publish_selfcontained/
+publish_small/
+publish_new/
+*.zip

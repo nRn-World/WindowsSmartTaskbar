@@ -22,6 +22,7 @@ namespace WindowsSmartTaskbar
         private static string CategoryFile => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "categories.json");
         private static string SettingsFile => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
         private const int MaxPrograms = 20;
+        private const string DefaultCategory = "All programs";
         private NotifyIcon? notifyIcon;
         private ContextMenuStrip? contextMenu;
         private ContextMenuStrip? leftClickMenu;
@@ -38,6 +39,7 @@ namespace WindowsSmartTaskbar
         private Button? editButton;
         private Button? categoryButton;
         private Button? removeCategoryButton;
+        private Button? editCategoryButton;
         private Label? categoryLabel;
 
         // Selection tracking
@@ -45,6 +47,7 @@ namespace WindowsSmartTaskbar
 
         // Localization
         private string currentLanguage = "en";
+        private string currentTheme = "dark";
         private static readonly Dictionary<string, Dictionary<string, string>> Strings = new Dictionary<string, Dictionary<string, string>>
         {
             ["sv"] = new Dictionary<string, string>
@@ -89,6 +92,14 @@ namespace WindowsSmartTaskbar
                 ["couldNotSave"] = "Kunde inte spara: {0}",
                 ["couldNotStart"] = "Kunde inte starta: {0}",
                 ["selectCategoryRemove"] = "Välj en kategori att ta bort.",
+                ["editCategory"] = "Redigera kategori",
+                ["editCategoryTitle"] = "Redigera kategorinamn",
+                ["selectCategoryEdit"] = "Välj en kategori att redigera.",
+                ["cannotEditDefault"] = "Kan inte redigera standardkategorin.",
+                ["categoryRenamed"] = "Kategorin '{0}' har döpts om till '{1}'!",
+                ["theme"] = "Tema",
+                ["dark"] = "Mörkt",
+                ["light"] = "Ljust",
             },
             ["en"] = new Dictionary<string, string>
             {
@@ -132,6 +143,14 @@ namespace WindowsSmartTaskbar
                 ["couldNotSave"] = "Could not save: {0}",
                 ["couldNotStart"] = "Could not start: {0}",
                 ["selectCategoryRemove"] = "Select a category to remove.",
+                ["editCategory"] = "Edit category",
+                ["editCategoryTitle"] = "Edit category name",
+                ["selectCategoryEdit"] = "Select a category to edit.",
+                ["cannotEditDefault"] = "Cannot edit the default category.",
+                ["categoryRenamed"] = "Category '{0}' has been renamed to '{1}'!",
+                ["theme"] = "Theme",
+                ["dark"] = "Dark",
+                ["light"] = "Light",
             },
             ["tr"] = new Dictionary<string, string>
             {
@@ -175,6 +194,14 @@ namespace WindowsSmartTaskbar
                 ["couldNotSave"] = "Kaydedilemedi: {0}",
                 ["couldNotStart"] = "Başlatılamadı: {0}",
                 ["selectCategoryRemove"] = "Kaldırmak için bir kategori seçin.",
+                ["editCategory"] = "Kategoriyi düzenle",
+                ["editCategoryTitle"] = "Kategori adını düzenle",
+                ["selectCategoryEdit"] = "Düzenlemek için bir kategori seçin.",
+                ["cannotEditDefault"] = "Varsayılan kategori düzenlenemez.",
+                ["categoryRenamed"] = "'{0}' kategorisinin adı '{1}' olarak değiştirildi!",
+                ["theme"] = "Tema",
+                ["dark"] = "Karanlık",
+                ["light"] = "Aydınlık",
             }
         };
 
@@ -193,6 +220,7 @@ namespace WindowsSmartTaskbar
             InitializeComponent();
             LoadCategories();
             LoadPrograms();
+            ApplyTheme();
             this.Icon = GenerateAppIcon();
             SetupNotifyIcon();
             this.WindowState = FormWindowState.Minimized;
@@ -206,7 +234,7 @@ namespace WindowsSmartTaskbar
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
-            this.BackColor = Color.FromArgb(245, 245, 250);
+            this.BackColor = currentTheme == "dark" ? Color.FromArgb(32, 32, 32) : Color.FromArgb(245, 245, 250);
 
             // Huvudpanel
             var mainPanel = new Panel
@@ -259,7 +287,7 @@ namespace WindowsSmartTaskbar
             var buttonPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
-                Height = 85,
+                Height = 135,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
                 Padding = new Padding(0, 5, 0, 5)
@@ -277,22 +305,26 @@ namespace WindowsSmartTaskbar
             categoryButton = CreateButton(T("addCategory"), Color.FromArgb(40, 167, 69), Color.White, 115);
             categoryButton.Click += CategoryButton_Click;
 
-            removeCategoryButton = CreateButton(T("removeCategory"), Color.FromArgb(220, 53, 69), Color.White, 130);
+            removeCategoryButton = CreateButton(T("removeCategory"), Color.FromArgb(220, 53, 69), Color.White, 115);
             removeCategoryButton.Click += RemoveCategoryButton_Click;
+
+            editCategoryButton = CreateButton(T("editCategory"), Color.FromArgb(255, 193, 7), Color.Black, 115);
+            editCategoryButton.Click += EditCategoryButton_Click;
 
             buttonPanel.Controls.Add(addButton);
             buttonPanel.Controls.Add(removeButton);
             buttonPanel.Controls.Add(editButton);
             buttonPanel.Controls.Add(categoryButton);
             buttonPanel.Controls.Add(removeCategoryButton);
+            buttonPanel.Controls.Add(editCategoryButton);
 
             // Programpanel (scrollbar panel istället för ListBox)
             programPanel = new Panel
             {
                 Dock = DockStyle.Fill,
                 AutoScroll = true,
-                BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White,
+                BorderStyle = currentTheme == "dark" ? BorderStyle.None : BorderStyle.FixedSingle,
                 Padding = new Padding(0)
             };
 
@@ -375,6 +407,17 @@ namespace WindowsSmartTaskbar
 
             langMenu.DropDownItems.AddRange(new ToolStripItem[] { svItem, enItem, trItem });
             settingsMenu.DropDownItems.Add(langMenu);
+
+            // Theme submenu
+            var themeMenu = new ToolStripMenuItem(T("theme"));
+            var darkItem = new ToolStripMenuItem(T("dark")) { Tag = "dark", Checked = currentTheme == "dark" };
+            var lightItem = new ToolStripMenuItem(T("light")) { Tag = "light", Checked = currentTheme == "light" };
+
+            darkItem.Click += (s, e) => ChangeTheme("dark");
+            lightItem.Click += (s, e) => ChangeTheme("light");
+
+            themeMenu.DropDownItems.AddRange(new ToolStripItem[] { darkItem, lightItem });
+            settingsMenu.DropDownItems.Add(themeMenu);
 
             // Reset all
             var resetItem = new ToolStripMenuItem(T("resetAll"));
@@ -531,6 +574,7 @@ namespace WindowsSmartTaskbar
             if (categoryButton != null) categoryButton.Text = T("addCategory");
             if (removeCategoryButton != null) removeCategoryButton.Text = T("removeCategory");
             UpdateStatus();
+            LoadCategories();
 
             // Rebuild the tray menu
             notifyIcon?.Dispose();
@@ -547,13 +591,49 @@ namespace WindowsSmartTaskbar
             {
                 programs.Clear();
                 categories.Clear();
-                categories.Add(new Category("Alla program"));
+                categories.Add(new Category(DefaultCategory));
                 SavePrograms();
                 SaveCategories();
                 LoadCategories();
                 RefreshProgramList();
                 MessageBox.Show(T("resetDone"), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private void ChangeTheme(string theme)
+        {
+            currentTheme = theme;
+            SaveSettings();
+            ApplyTheme();
+
+            // Refresh tray menu to update checkmarks
+            notifyIcon?.Dispose();
+            notifyIcon = null;
+            contextMenu = null;
+            SetupNotifyIcon();
+        }
+
+        private void ApplyTheme()
+        {
+            Color bgColor = currentTheme == "dark" ? Color.FromArgb(32, 32, 32) : Color.FromArgb(245, 245, 250);
+            Color panelBg = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
+            Color textColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30);
+            Color secondaryTextColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray;
+            Color borderColor = currentTheme == "dark" ? Color.FromArgb(60, 60, 60) : Color.FromArgb(230, 230, 230);
+
+            this.BackColor = bgColor;
+            
+            if (programPanel != null)
+            {
+                programPanel.BackColor = panelBg;
+                programPanel.BorderStyle = currentTheme == "dark" ? BorderStyle.None : BorderStyle.FixedSingle;
+            }
+
+            if (categoryLabel != null) categoryLabel.ForeColor = textColor;
+            if (statusLabel != null) statusLabel.ForeColor = secondaryTextColor;
+
+            // Update nested controls if any
+            RefreshProgramList();
         }
 
         private void LoadSettings()
@@ -565,7 +645,10 @@ namespace WindowsSmartTaskbar
                     var json = File.ReadAllText(SettingsFile);
                     var settings = JsonSerializer.Deserialize<AppSettings>(json);
                     if (settings != null)
+                    {
                         currentLanguage = settings.Language ?? "en";
+                        currentTheme = settings.Theme ?? "dark";
+                    }
                 }
             }
             catch { }
@@ -575,7 +658,11 @@ namespace WindowsSmartTaskbar
         {
             try
             {
-                var settings = new AppSettings { Language = currentLanguage };
+                var settings = new AppSettings 
+                { 
+                    Language = currentLanguage,
+                    Theme = currentTheme
+                };
                 var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(SettingsFile, json);
             }
@@ -650,7 +737,7 @@ namespace WindowsSmartTaskbar
             selectedIndices.Clear();
 
             // Filter programs
-            var filtered = currentCategory == "Alla program"
+            var filtered = currentCategory == DefaultCategory
                 ? programs.ToList()
                 : programs.Where(p => p.Category == currentCategory).ToList();
 
@@ -671,7 +758,7 @@ namespace WindowsSmartTaskbar
             {
                 Height = 50,
                 Dock = DockStyle.Top,
-                BackColor = Color.White,
+                BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White,
                 Cursor = Cursors.Hand,
                 Tag = index
             };
@@ -681,7 +768,7 @@ namespace WindowsSmartTaskbar
             {
                 Height = 1,
                 Dock = DockStyle.Bottom,
-                BackColor = Color.FromArgb(230, 230, 230)
+                BackColor = currentTheme == "dark" ? Color.FromArgb(60, 60, 60) : Color.FromArgb(230, 230, 230)
             };
 
             // Icon
@@ -704,7 +791,7 @@ namespace WindowsSmartTaskbar
             {
                 Text = program.Name,
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = Color.FromArgb(30, 30, 30),
+                ForeColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30),
                 Location = new Point(48, 4),
                 AutoSize = false,
                 Size = new Size(320, 22),
@@ -716,7 +803,7 @@ namespace WindowsSmartTaskbar
             {
                 Text = Path.GetFileName(program.FilePath),
                 Font = new Font("Segoe UI", 8),
-                ForeColor = Color.Gray,
+                ForeColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray,
                 Location = new Point(48, 26),
                 AutoSize = false,
                 Size = new Size(320, 18),
@@ -798,7 +885,7 @@ namespace WindowsSmartTaskbar
                 ctrl.MouseLeave += (s, e) =>
                 {
                     if (!selectedIndices.Contains((int)row.Tag))
-                        row.BackColor = Color.White;
+                        row.BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
                 };
             };
             addHover(row);
@@ -812,20 +899,24 @@ namespace WindowsSmartTaskbar
         private void DeselectAllRows()
         {
             if (programPanel == null) return;
+            Color panelBg = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
+            Color textColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30);
+            Color secondaryTextColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray;
+
             foreach (Control ctrl in programPanel.Controls)
             {
                 if (ctrl is Panel p && p.Tag is int)
                 {
-                    p.BackColor = Color.White;
+                    p.BackColor = panelBg;
                     foreach (Control child in p.Controls)
                     {
                         if (child is Label lbl)
                         {
-                            lbl.BackColor = Color.White;
+                            lbl.BackColor = panelBg;
                             if (lbl.Font.Bold)
-                                lbl.ForeColor = Color.FromArgb(30, 30, 30);
+                                lbl.ForeColor = textColor;
                             else
-                                lbl.ForeColor = Color.Gray;
+                                lbl.ForeColor = secondaryTextColor;
                         }
                     }
                 }
@@ -988,8 +1079,9 @@ namespace WindowsSmartTaskbar
             }
 
             string selectedCategory = categoryComboBox.SelectedItem.ToString() ?? string.Empty;
+            string displayDefault = T("allPrograms");
 
-            if (selectedCategory == "Alla program")
+            if (selectedCategory == displayDefault || selectedCategory == DefaultCategory)
             {
                 MessageBox.Show(T("cannotRemoveDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -1007,7 +1099,7 @@ namespace WindowsSmartTaskbar
                 if (result == DialogResult.Yes)
                 {
                     foreach (var program in programsInCategory)
-                        program.Category = "Alla program";
+                        program.Category = DefaultCategory;
                     SavePrograms();
                 }
                 else return;
@@ -1023,11 +1115,105 @@ namespace WindowsSmartTaskbar
             }
         }
 
+        private void EditCategoryButton_Click(object? sender, EventArgs e)
+        {
+            if (categoryComboBox == null || categoryComboBox.SelectedItem == null)
+            {
+                MessageBox.Show(T("selectCategoryEdit"), T("noSelection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string selectedCategory = categoryComboBox.SelectedItem.ToString() ?? string.Empty;
+            string displayDefault = T("allPrograms");
+
+            if (selectedCategory == displayDefault || selectedCategory == DefaultCategory)
+            {
+                MessageBox.Show(T("cannotEditDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (var inputDialog = new Form())
+            {
+                inputDialog.Text = T("editCategoryTitle");
+                inputDialog.Size = new Size(350, 150);
+                inputDialog.StartPosition = FormStartPosition.CenterParent;
+                inputDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                inputDialog.MaximizeBox = false;
+                inputDialog.MinimizeBox = false;
+
+                var label = new Label { Text = T("categoryName"), Left = 20, Top = 20, Width = 100 };
+                var textBox = new TextBox { Left = 120, Top = 20, Width = 200, Text = selectedCategory };
+                var okButton = new Button { Text = T("ok"), Left = 120, Top = 60, Width = 80, DialogResult = DialogResult.OK };
+                var cancelButton = new Button { Text = T("cancel"), Left = 210, Top = 60, Width = 80, DialogResult = DialogResult.Cancel };
+
+                inputDialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
+                inputDialog.AcceptButton = okButton;
+                inputDialog.CancelButton = cancelButton;
+
+                if (inputDialog.ShowDialog() == DialogResult.OK)
+                {
+                    string newCategoryName = textBox.Text.Trim();
+                    if (string.IsNullOrEmpty(newCategoryName))
+                        return;
+
+                    if (newCategoryName.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase))
+                        return;
+
+                    if (categories.Any(c => c.Name.Equals(newCategoryName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        MessageBox.Show(T("categoryExists"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    // Update category name
+                    var categoryToEdit = categories.FirstOrDefault(c => c.Name == selectedCategory);
+                    if (categoryToEdit != null)
+                    {
+                        categoryToEdit.Name = newCategoryName;
+                        
+                        // Update programs
+                        foreach (var prog in programs.Where(p => p.Category == selectedCategory))
+                        {
+                            prog.Category = newCategoryName;
+                        }
+
+                        SaveCategories();
+                        SavePrograms();
+                        
+                        // Reload and select the new name
+                        LoadCategories();
+                        
+                        if (categoryComboBox != null)
+                        {
+                            int index = -1;
+                            for(int i=0; i < categoryComboBox.Items.Count; i++)
+                            {
+                                if (categoryComboBox.Items[i].ToString() == newCategoryName)
+                                {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                            if (index >= 0)
+                                categoryComboBox.SelectedIndex = index;
+                        }
+
+                        MessageBox.Show(string.Format(T("categoryRenamed"), selectedCategory, newCategoryName), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+            }
+        }
+
         private void CategoryComboBox_SelectedIndexChanged(object? sender, EventArgs e)
         {
             if (categoryComboBox != null && categoryComboBox.SelectedIndex >= 0)
             {
-                currentCategory = categoryComboBox.SelectedItem?.ToString() ?? "Alla program";
+                string selected = categoryComboBox.SelectedItem?.ToString() ?? DefaultCategory;
+                if (selected == T("allPrograms"))
+                    currentCategory = DefaultCategory;
+                else
+                    currentCategory = selected;
+                    
                 RefreshProgramList();
             }
         }
@@ -1038,25 +1224,51 @@ namespace WindowsSmartTaskbar
         {
             try
             {
+                var loadedCategories = new List<Category>();
                 if (File.Exists(CategoryFile))
                 {
                     var json = File.ReadAllText(CategoryFile);
-                    var savedCategories = JsonSerializer.Deserialize<List<Category>>(json);
-                    if (savedCategories != null)
-                        categories = savedCategories;
+                    var saved = JsonSerializer.Deserialize<List<Category>>(json);
+                    if (saved != null)
+                    {
+                        loadedCategories.AddRange(saved);
+                    }
                 }
 
-                if (!categories.Any(c => c.Name == "All programs"))
-                    categories.Insert(0, new Category("All programs"));
+                // Filter out any existing "All programs" variants from loaded categories
+                // Also filter "Alla program" to avoid confusion/duplication
+                categories = loadedCategories.Where(c => 
+                    !string.Equals(c.Name, DefaultCategory, StringComparison.OrdinalIgnoreCase) && 
+                    !string.Equals(c.Name, "All programs", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(c.Name, "Alla program", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                // Always insert DefaultCategory at the top
+                categories.Insert(0, new Category(DefaultCategory));
 
                 if (categoryComboBox != null)
                 {
                     categoryComboBox.SelectedIndexChanged -= CategoryComboBox_SelectedIndexChanged;
                     categoryComboBox.Items.Clear();
+                    
+                    // Use a HashSet to track added names to prevent UI duplicates
+                    var addedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (var category in categories)
-                        categoryComboBox.Items.Add(category.Name);
-                    categoryComboBox.SelectedItem = "All programs";
-                    currentCategory = "All programs";
+                    {
+                        string displayName = category.Name == DefaultCategory ? T("allPrograms") : category.Name;
+                        
+                        // Only add if not already present (case-insensitive check for display name)
+                        if (!addedNames.Contains(displayName))
+                        {
+                            categoryComboBox.Items.Add(displayName);
+                            addedNames.Add(displayName);
+                        }
+                    }
+
+                    if (categoryComboBox.Items.Count > 0)
+                        categoryComboBox.SelectedIndex = 0;
+                        
+                    currentCategory = DefaultCategory;
                     categoryComboBox.SelectedIndexChanged += CategoryComboBox_SelectedIndexChanged;
                 }
             }
@@ -1104,7 +1316,9 @@ namespace WindowsSmartTaskbar
                         {
                             var program = new ProgramItem(data.Name, data.FilePath, data.Arguments);
                             program.AddedDate = data.AddedDate;
-                            program.Category = data.Category ?? "Alla program";
+                            program.Category = data.Category;
+                            if (string.IsNullOrEmpty(program.Category) || program.Category == "Alla program")
+                                program.Category = DefaultCategory;
                             programs.Add(program);
                         }
                     }
@@ -1180,5 +1394,6 @@ namespace WindowsSmartTaskbar
     public class AppSettings
     {
         public string? Language { get; set; }
+        public string? Theme { get; set; }
     }
 }
