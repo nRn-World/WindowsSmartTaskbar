@@ -1265,7 +1265,7 @@ namespace WindowsSmartTaskbar
                             int index = -1;
                             for(int i=0; i < categoryComboBox.Items.Count; i++)
                             {
-                                if (categoryComboBox.Items[i].ToString() == newCategoryName)
+                                if (categoryComboBox.Items[i]?.ToString() == newCategoryName)
                                 {
                                     index = i;
                                     break;
@@ -1393,7 +1393,7 @@ namespace WindowsSmartTaskbar
                         {
                             var program = new ProgramItem(data.Name, data.FilePath, data.Arguments);
                             program.AddedDate = data.AddedDate;
-                            program.Category = data.Category;
+                            program.Category = data.Category ?? DefaultCategory;
                             if (string.IsNullOrEmpty(program.Category) || program.Category == "Alla program")
                                 program.Category = DefaultCategory;
                             programs.Add(program);
