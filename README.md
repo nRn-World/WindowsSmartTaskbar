@@ -15,7 +15,7 @@
 *   **⚡ Quick Access Menu**: Left-click the system tray icon to instantly access your categorized programs.
 *   **🎨 Modern Interface**: Clean, dark-themed UI that respects your desktop aesthetics.
 *   **💾 Portable**: No installation required. Runs as a single executable file.
-*   **🌍 Multi-Language**: Built-in support for English and Swedish.
+*   **🌍 Multi-Language**: Built-in support for English, Turkish and Swedish.
 *   **🚀 Auto-Start**: Optional setting to launch automatically with Windows.
 
 ---
