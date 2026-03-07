@@ -22,8 +22,21 @@
 
 ## 📸 Screenshots
 
-![Main window](Screenshot/Screenshot%201.png)  
-![Quick access menu](Screenshot/Screenshot%202.png)
+<p align="center">
+  <a href="Screenshot/Screenshot%201.png">
+    <img src="Screenshot/Screenshot%201.png" alt="Main window" width="31%" />
+  </a>
+  <a href="Screenshot/Screenshot%202.png">
+    <img src="Screenshot/Screenshot%202.png" alt="Quick access menu" width="31%" />
+  </a>
+  <a href="Screenshot/Screenshot%203.png">
+    <img src="Screenshot/Screenshot%203.png" alt="Program settings" width="31%" />
+  </a>
+</p>
+
+<p align="center">
+  <em>Main window</em> &nbsp;&nbsp;•&nbsp;&nbsp; <em>Quick access menu</em> &nbsp;&nbsp;•&nbsp;&nbsp; <em>Program settings</em>
+</p>
 
 ---
 
