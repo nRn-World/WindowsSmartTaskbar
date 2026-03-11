@@ -32,7 +32,12 @@ namespace WindowsSmartTaskbar
         private ContextMenuStrip? contextMenu;
         private ContextMenuStrip? leftClickMenu;
         private System.Windows.Forms.Timer? clickTimer;
-        private DateTime lastDoubleClickTime = DateTime.MinValue;
+        private static readonly HashSet<string> DefaultCategoryAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            DefaultCategory,
+            "All programs",
+            "Alla program"
+        };
 
         // UI controls
         private Panel? programPanel;
@@ -264,6 +269,40 @@ namespace WindowsSmartTaskbar
             Debug.WriteLine($"[{nameof(MainForm)}::{context}] {ex}");
         }
 
+        private static bool IsDefaultCategoryAlias(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return true;
+            }
+
+            return DefaultCategoryAliases.Contains(name.Trim());
+        }
+
+        private void DisposeClickTimer()
+        {
+            if (clickTimer == null)
+            {
+                return;
+            }
+
+            clickTimer.Stop();
+            clickTimer.Dispose();
+            clickTimer = null;
+        }
+
+        private void RebuildTrayIcon()
+        {
+            DisposeClickTimer();
+            leftClickMenu?.Dispose();
+            leftClickMenu = null;
+            contextMenu?.Dispose();
+            contextMenu = null;
+            notifyIcon?.Dispose();
+            notifyIcon = null;
+            SetupNotifyIcon();
+        }
+
         public MainForm()
         {
             EnsureDataFolder();
@@ -455,6 +494,8 @@ namespace WindowsSmartTaskbar
 
         private void SetupNotifyIcon()
         {
+            DisposeClickTimer();
+
             notifyIcon = new NotifyIcon
             {
                 Text = "WindowsSmartTaskbar",
@@ -520,21 +561,24 @@ namespace WindowsSmartTaskbar
 
             notifyIcon.ContextMenuStrip = contextMenu;
 
-            clickTimer = new System.Windows.Forms.Timer();
-            clickTimer.Interval = SystemInformation.DoubleClickTime;
-            clickTimer.Tick += (s, e) =>
+            var timer = new System.Windows.Forms.Timer
             {
-                clickTimer.Stop();
+                Interval = SystemInformation.DoubleClickTime
+            };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
                 BuildQuickLaunchMenu();
                 SetForegroundWindow(this.Handle); // Ensure focus for menu
                 leftClickMenu?.Show(Cursor.Position);
             };
+            clickTimer = timer;
 
             notifyIcon.MouseClick += (s, e) => 
             { 
                 if (e.Button == MouseButtons.Left) 
                 {
-                    clickTimer.Start();
+                    timer.Start();
                 }
             };
             
@@ -542,7 +586,7 @@ namespace WindowsSmartTaskbar
             { 
                 if (e.Button == MouseButtons.Left) 
                 {
-                    clickTimer.Stop();
+                    timer.Stop();
                     ShowProgramList(); 
                 }
             };
@@ -563,6 +607,17 @@ namespace WindowsSmartTaskbar
             {
                 var displayName = cat.Name == DefaultCategory ? T("allPrograms") : cat.Name;
                 var catItem = new ToolStripMenuItem(displayName);
+                if (!string.IsNullOrWhiteSpace(cat.Color))
+                {
+                    try
+                    {
+                        catItem.ForeColor = ColorTranslator.FromHtml(cat.Color);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogDebug(nameof(BuildQuickLaunchMenu), ex);
+                    }
+                }
                 
                 var categoryPrograms = programs.Where(p => p.Category == cat.Name).ToList();
                 if (cat.Name == DefaultCategory)
@@ -669,10 +724,7 @@ namespace WindowsSmartTaskbar
             LoadCategories();
 
             // Rebuild the tray menu
-            notifyIcon?.Dispose();
-            notifyIcon = null;
-            contextMenu = null;
-            SetupNotifyIcon();
+            RebuildTrayIcon();
         }
 
         private void ResetAllButton_Click(object? sender, EventArgs e)
@@ -699,10 +751,7 @@ namespace WindowsSmartTaskbar
             ApplyTheme();
 
             // Refresh tray menu to update checkmarks
-            notifyIcon?.Dispose();
-            notifyIcon = null;
-            contextMenu = null;
-            SetupNotifyIcon();
+            RebuildTrayIcon();
         }
 
         private void ApplyTheme()
@@ -798,16 +847,17 @@ namespace WindowsSmartTaskbar
 
         private void SetAutostart(bool enable)
         {
-            // Uppdatera den sparade inställningen
-            autostartEnabled = enable;
-            SaveSettings();
+            bool previousValue = autostartEnabled;
 
             try
             {
                 ApplyAutostartToRegistry(enable);
+                autostartEnabled = enable;
+                SaveSettings();
             }
             catch (Exception ex)
             {
+                autostartEnabled = previousValue;
                 MessageBox.Show(string.Format(T("couldNotSave"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -880,7 +930,12 @@ namespace WindowsSmartTaskbar
             if (programPanel == null) return;
 
             programPanel.SuspendLayout();
+            var oldControls = programPanel.Controls.Cast<Control>().ToArray();
             programPanel.Controls.Clear();
+            foreach (var control in oldControls)
+            {
+                control.Dispose();
+            }
             selectedIndices.Clear();
 
             // Filter programs
@@ -1324,7 +1379,7 @@ namespace WindowsSmartTaskbar
                 if (inputDialog.ShowDialog() == DialogResult.OK)
                 {
                     string categoryName = textBox.Text.Trim();
-                    if (!string.IsNullOrEmpty(categoryName) && !categories.Any(c => c.Name.Equals(categoryName, StringComparison.OrdinalIgnoreCase)))
+                    if (!string.IsNullOrEmpty(categoryName) && !IsDefaultCategoryAlias(categoryName) && !categories.Any(c => c.Name.Equals(categoryName, StringComparison.OrdinalIgnoreCase)))
                     {
                         categories.Add(new Category(categoryName));
                         SaveCategories();
@@ -1448,6 +1503,12 @@ namespace WindowsSmartTaskbar
                     if (newCategoryName.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase))
                         return;
 
+                    if (IsDefaultCategoryAlias(newCategoryName))
+                    {
+                        MessageBox.Show(T("cannotEditDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
                     if (categories.Any(c => c.Name.Equals(newCategoryName, StringComparison.OrdinalIgnoreCase)))
                     {
                         MessageBox.Show(T("categoryExists"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1526,10 +1587,7 @@ namespace WindowsSmartTaskbar
 
                 // Filter out any existing "All programs" variants from loaded categories
                 // Also filter "Alla program" to avoid confusion/duplication
-                categories = loadedCategories.Where(c => 
-                    !string.Equals(c.Name, DefaultCategory, StringComparison.OrdinalIgnoreCase) && 
-                    !string.Equals(c.Name, "All programs", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(c.Name, "Alla program", StringComparison.OrdinalIgnoreCase)).ToList();
+                categories = loadedCategories.Where(c => !IsDefaultCategoryAlias(c.Name)).ToList();
 
                 // Always insert DefaultCategory at the top
                 categories.Insert(0, new Category(DefaultCategory));
@@ -1565,14 +1623,14 @@ namespace WindowsSmartTaskbar
             {
                 MessageBox.Show(string.Format(T("couldNotLoad"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 categories.Clear();
-                categories.Add(new Category("All programs"));
+                categories.Add(new Category(DefaultCategory));
 
                 if (categoryComboBox != null)
                 {
                     categoryComboBox.Items.Clear();
-                    categoryComboBox.Items.Add("All programs");
-                    categoryComboBox.SelectedItem = "All programs";
-                    currentCategory = "All programs";
+                    categoryComboBox.Items.Add(T("allPrograms"));
+                    categoryComboBox.SelectedItem = T("allPrograms");
+                    currentCategory = DefaultCategory;
                 }
             }
         }
@@ -1606,7 +1664,7 @@ namespace WindowsSmartTaskbar
                             var program = new ProgramItem(data.Name, data.FilePath, data.Arguments);
                             program.AddedDate = data.AddedDate;
                             program.Category = data.Category ?? DefaultCategory;
-                            if (string.IsNullOrEmpty(program.Category) || program.Category == "Alla program")
+                            if (IsDefaultCategoryAlias(program.Category))
                                 program.Category = DefaultCategory;
                             programs.Add(program);
                         }
@@ -1665,6 +1723,9 @@ namespace WindowsSmartTaskbar
             }
             else
             {
+                DisposeClickTimer();
+                leftClickMenu?.Dispose();
+                contextMenu?.Dispose();
                 notifyIcon?.Dispose();
             }
             base.OnFormClosing(e);

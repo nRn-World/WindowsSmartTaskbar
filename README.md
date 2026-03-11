@@ -44,8 +44,8 @@
 
 ### Option 1: Quick Start (Recommended)
 
-1. Go to the [**Releases**](../../releases) page.
-2. Download the latest `WindowsSmartTaskbar.zip`.
+1. Go to the [**Releases**](https://github.com/RobinAyzit/WindowsSmartTaskbar/releases) page.
+2. Download the latest portable archive for your platform (for example `WindowsSmartTaskbar-win-x64-portable-no-dotnet-needed.zip` or `WindowsSmartTaskbar-win-arm64-portable-no-dotnet-needed.zip`).
 3. Extract the ZIP file to a location of your choice (e.g., `C:\Apps\SmartTaskbar`).
 4. Run `WindowsSmartTaskbar.exe`.
 

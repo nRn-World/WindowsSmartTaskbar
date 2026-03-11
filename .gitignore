@@ -28,5 +28,25 @@ publish_selfcontained/
 publish_small/
 publish_new/
 publish_release/
+plans/*.dll
+plans/*.exe
+plans/*.pdb
 *.zip
 *.pdb
+
+# Secrets and env files
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS/system files
+.DS_Store
+Thumbs.db
+
+# Common build/dependency folders
+dist/
+out/
+node_modules/
