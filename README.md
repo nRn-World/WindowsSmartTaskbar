@@ -113,6 +113,11 @@ This project is licensed under the MIT License – see the [LICENSE](LICENSE) fi
 Created 2026 by © nRn World
 📧 bynrnworld@gmail.com
 
+👨‍💻 **Author**  
+Created 2026 by © nRn World
+
+📧 bynrnworld@gmail.com
+
 ## 🙏 Support
 
 If you like this project, consider:
