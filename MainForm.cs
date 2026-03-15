@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -1164,21 +1164,25 @@ namespace WindowsSmartTaskbar
             // "Move to category" menu item with submenu
             var moveToItem = new ToolStripMenuItem(T("moveToCategory"));
             
-            // Add all available categories (except the current one)
+            // Add all available categories
             foreach (var category in categories)
             {
-                if (category.Name != program.Category)
+                string displayName = category.Name == DefaultCategory ? T("allPrograms") : category.Name;
+                var categoryItem = new ToolStripMenuItem(displayName)
                 {
-                    string displayName = category.Name == DefaultCategory ? T("allPrograms") : category.Name;
-                    var categoryItem = new ToolStripMenuItem(displayName);
-                    categoryItem.Click += (s, e) => 
+                    Checked = string.Equals(category.Name, program.Category, StringComparison.OrdinalIgnoreCase)
+                };
+                
+                categoryItem.Click += (s, e) => 
+                {
+                    if (!string.Equals(program.Category, category.Name, StringComparison.OrdinalIgnoreCase))
                     {
                         program.Category = category.Name;
                         SavePrograms();
                         RefreshProgramList();
-                    };
-                    moveToItem.DropDownItems.Add(categoryItem);
-                }
+                    }
+                };
+                moveToItem.DropDownItems.Add(categoryItem);
             }
 
             contextMenu.Items.Add(moveToItem);
@@ -1384,6 +1388,7 @@ namespace WindowsSmartTaskbar
                         categories.Add(new Category(categoryName));
                         SaveCategories();
                         LoadCategories();
+                        RefreshProgramList(); // Refresh to update context menus
                         MessageBox.Show(string.Format(T("categoryAdded"), categoryName), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     else if (!string.IsNullOrEmpty(categoryName))
@@ -1455,6 +1460,7 @@ namespace WindowsSmartTaskbar
                 categories.Remove(categoryToRemove);
                 SaveCategories();
                 LoadCategories();
+                RefreshProgramList(); // Refresh to update context menus
                 MessageBox.Show(string.Format(T("categoryRemoved"), selectedCategory), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -1532,6 +1538,7 @@ namespace WindowsSmartTaskbar
                         
                         // Reload and select the new name
                         LoadCategories();
+                        RefreshProgramList(); // Refresh to update context menus
                         
                         if (categoryComboBox != null)
                         {
