@@ -3,1761 +3,664 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
-using System.Runtime.InteropServices;
-using System.Diagnostics;
+using System.Diagnostics; // Added for Drag-and-Drop logic
 
 namespace WindowsSmartTaskbar
 {
     public partial class MainForm : Form
     {
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+        [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+        [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+        [DllImport("Gdi32.dll", EntryPoint = "CreateRoundRectRgn")] private static extern IntPtr CreateRoundRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect, int nWidthEllipse, int nHeightEllipse);
+        [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
 
-        [DllImport("user32.dll")]
-        private static extern bool DestroyIcon(IntPtr hIcon);
+        private const int HOTKEY_ID = 9000;
+        private const uint MOD_ALT = 0x0001;
+        private const uint MOD_CONTROL = 0x0002;
+        private const uint VK_W = 0x57; 
+        private const int WM_HOTKEY = 0x0312;
+        public const int WM_NCLBUTTONDOWN = 0xA1; public const int HT_CAPTION = 0x2;
 
         private List<ProgramItem> programs = new List<ProgramItem>();
         private List<Category> categories = new List<Category>();
         private string currentCategory = "All programs";
-        private static string AppDataFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowsSmartTaskbar");
-        private static string ConfigFile => Path.Combine(AppDataFolder, "programs.json");
-        private static string CategoryFile => Path.Combine(AppDataFolder, "categories.json");
-        private static string SettingsFile => Path.Combine(AppDataFolder, "settings.json");
-        private const int MaxPrograms = 20;
         private const string DefaultCategory = "All programs";
-        private NotifyIcon? notifyIcon;
-        private ContextMenuStrip? contextMenu;
-        private ContextMenuStrip? leftClickMenu;
-        private System.Windows.Forms.Timer? clickTimer;
-        private static readonly HashSet<string> DefaultCategoryAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            DefaultCategory,
-            "All programs",
-            "Alla program"
-        };
-
-        // UI controls
-        private Panel? programPanel;
-        private Label? statusLabel;
-        private Label? copyrightLabel;
-        private ComboBox? categoryComboBox;
-        private Label? titleLabel;
-        private Button? addButton;
-        private Button? removeButton;
-        private Button? editButton;
-        private Button? categoryButton;
-        private Button? removeCategoryButton;
-        private Button? editCategoryButton;
-        private Label? categoryLabel;
-
-        // Selection tracking
+        private int MaxPrograms = 100;
         private HashSet<int> selectedIndices = new HashSet<int>();
-        
-        // Drag and Drop
-        private ProgramItem? draggedItem;
-        private Point dragStartPoint;
+        private string searchFilter = "";
 
-        public List<ProgramItem> GetPrograms() => programs;
-        public List<Category> GetCategories() => categories;
-        
-        public void SetProgramCategory(ProgramItem program, string category)
-        {
-            program.Category = category;
-            SavePrograms();
-            RefreshProgramList();
-        }
+        private string AppDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowsSmartTaskbar");
+        private string ConfigFile => Path.Combine(AppDataFolder, "programs.json");
+        private string CategoryFile => Path.Combine(AppDataFolder, "categories.json");
+        private string SettingsFile => Path.Combine(AppDataFolder, "settings.json");
 
-        public void MoveProgram(ProgramItem source, ProgramItem target)
-        {
-            if (source == target) return;
-
-            int oldIndex = programs.IndexOf(source);
-            int newIndex = programs.IndexOf(target);
-
-            if (oldIndex >= 0 && newIndex >= 0)
-            {
-                programs.RemoveAt(oldIndex);
-                programs.Insert(newIndex, source);
-                SavePrograms();
-                RefreshProgramList();
-            }
-        }
-
-        // Localization
-        private string currentLanguage = "en";
+        private string currentLanguage = "sv";
         private string currentTheme = "dark";
-        private static readonly Dictionary<string, Dictionary<string, string>> Strings = new Dictionary<string, Dictionary<string, string>>
-        {
-            ["sv"] = new Dictionary<string, string>
-            {
-                ["title"] = "WindowsSmartTaskbar",
-                ["category"] = "Kategori:",
-                ["addProgram"] = "LÃ¤gg till program",
-                ["remove"] = "Ta bort",
-                ["editName"] = "Redigera namn",
-                ["addCategory"] = "LÃ¤gg till kategori",
-                ["removeCategory"] = "Ta bort kategori",
-                ["allPrograms"] = "Alla program",
-                ["showPrograms"] = "Visa program",
-                ["exit"] = "Avsluta",
-                ["startWithWindows"] = "Starta med Windows",
-                ["settings"] = "InstÃ¤llningar",
-                ["language"] = "SprÃ¥k",
-                ["resetAll"] = "Radera allt",
-                ["resetConfirm"] = "Ã„r du sÃ¤ker pÃ¥ att du vill radera alla program och kategorier?",
-                ["resetTitle"] = "BekrÃ¤fta radering",
-                ["resetDone"] = "Alla program och kategorier har raderats.",
-                ["limitReached"] = "Du kan bara lÃ¤gga till max {0} program.",
-                ["selectFile"] = "VÃ¤lj ett program eller genvÃ¤g att lÃ¤gga till",
-                ["fileFilter"] = "Program och genvÃ¤gar (*.exe;*.lnk)|*.exe;*.lnk|Programfiler (*.exe)|*.exe|GenvÃ¤gar (*.lnk)|*.lnk|Alla filer (*.*)|*.*",
-                ["noSelection"] = "Inget valt",
-                ["selectProgramRemove"] = "VÃ¤lj minst ett program att ta bort.",
-                ["selectProgramEdit"] = "VÃ¤lj ett program att redigera.",
-                ["editNameTitle"] = "Redigera programnamn",
-                ["newName"] = "Nytt namn:",
-                ["ok"] = "OK",
-                ["cancel"] = "Avbryt",
-                ["addCategoryTitle"] = "LÃ¤gg till kategori",
-                ["categoryName"] = "Kategorinamn:",
-                ["categoryAdded"] = "Kategorin '{0}' har lagts till!",
-                ["categoryExists"] = "Kategorin finns redan.",
-                ["categoryRemoved"] = "Kategorin '{0}' har tagits bort!",
-                ["cannotRemoveDefault"] = "Kan inte ta bort standardkategorin 'Alla program'.",
-                ["programsInCategory"] = "Det finns {0} program i kategorin '{1}'.\n\nVill du flytta dessa program till 'Alla program'?",
-                ["error"] = "Fel",
-                ["programCount"] = "Program: {0}/{1}",
-                ["couldNotLoad"] = "Kunde inte ladda: {0}",
-                ["couldNotSave"] = "Kunde inte spara: {0}",
-                ["couldNotStart"] = "Kunde inte starta: {0}",
-                ["selectCategoryRemove"] = "VÃ¤lj en kategori att ta bort.",
-                ["editCategory"] = "Redigera kategori",
-                ["editCategoryTitle"] = "Redigera kategorinamn",
-                ["selectCategoryEdit"] = "VÃ¤lj en kategori att redigera.",
-                ["cannotEditDefault"] = "Kan inte redigera standardkategorin.",
-                ["categoryRenamed"] = "Kategorin '{0}' har dÃ¶pts om till '{1}'!",
-                ["theme"] = "Tema",
-                ["dark"] = "MÃ¶rkt",
-                ["light"] = "Ljust",
-                ["moveToCategory"] = "Flytta till kategori",
-                ["contextDelete"] = "Radera",
-                ["contextRename"] = "Redigera namn",
-            },
-            ["en"] = new Dictionary<string, string>
-            {
-                ["title"] = "WindowsSmartTaskbar",
-                ["category"] = "Category:",
-                ["addProgram"] = "Add program",
-                ["remove"] = "Remove",
-                ["editName"] = "Edit name",
-                ["addCategory"] = "Add category",
-                ["removeCategory"] = "Remove category",
-                ["allPrograms"] = "All programs",
-                ["showPrograms"] = "Show programs",
-                ["exit"] = "Exit",
-                ["startWithWindows"] = "Start with Windows",
-                ["settings"] = "Settings",
-                ["language"] = "Language",
-                ["resetAll"] = "Reset all",
-                ["resetConfirm"] = "Are you sure you want to delete all programs and categories?",
-                ["resetTitle"] = "Confirm reset",
-                ["resetDone"] = "All programs and categories have been deleted.",
-                ["limitReached"] = "You can only add up to {0} programs.",
-                ["selectFile"] = "Select a program or shortcut to add",
-                ["fileFilter"] = "Programs and shortcuts (*.exe;*.lnk)|*.exe;*.lnk|Program files (*.exe)|*.exe|Shortcuts (*.lnk)|*.lnk|All files (*.*)|*.*",
-                ["noSelection"] = "Nothing selected",
-                ["selectProgramRemove"] = "Select at least one program to remove.",
-                ["selectProgramEdit"] = "Select a program to edit.",
-                ["editNameTitle"] = "Edit program name",
-                ["newName"] = "New name:",
-                ["ok"] = "OK",
-                ["cancel"] = "Cancel",
-                ["addCategoryTitle"] = "Add category",
-                ["categoryName"] = "Category name:",
-                ["categoryAdded"] = "Category '{0}' has been added!",
-                ["categoryExists"] = "Category already exists.",
-                ["categoryRemoved"] = "Category '{0}' has been removed!",
-                ["cannotRemoveDefault"] = "Cannot remove the default category.",
-                ["programsInCategory"] = "There are {0} programs in category '{1}'.\n\nDo you want to move them to the default category?",
-                ["error"] = "Error",
-                ["programCount"] = "Programs: {0}/{1}",
-                ["couldNotLoad"] = "Could not load: {0}",
-                ["couldNotSave"] = "Could not save: {0}",
-                ["couldNotStart"] = "Could not start: {0}",
-                ["selectCategoryRemove"] = "Select a category to remove.",
-                ["editCategory"] = "Edit category",
-                ["editCategoryTitle"] = "Edit category name",
-                ["selectCategoryEdit"] = "Select a category to edit.",
-                ["cannotEditDefault"] = "Cannot edit the default category.",
-                ["categoryRenamed"] = "Category '{0}' has been renamed to '{1}'!",
-                ["theme"] = "Theme",
-                ["dark"] = "Dark",
-                ["light"] = "Light",
-                ["moveToCategory"] = "Move to category",
-                ["contextDelete"] = "Delete",
-                ["contextRename"] = "Rename",
-            },
-            ["tr"] = new Dictionary<string, string>
-            {
-                ["title"] = "WindowsSmartTaskbar",
-                ["category"] = "Kategori:",
-                ["addProgram"] = "Program ekle",
-                ["remove"] = "KaldÄ±r",
-                ["editName"] = "AdÄ± dÃ¼zenle",
-                ["addCategory"] = "Kategori ekle",
-                ["removeCategory"] = "Kategoriyi kaldÄ±r",
-                ["allPrograms"] = "TÃ¼m programlar",
-                ["showPrograms"] = "ProgramlarÄ± gÃ¶ster",
-                ["exit"] = "Ã‡Ä±kÄ±ÅŸ",
-                ["startWithWindows"] = "Windows ile baÅŸlat",
-                ["settings"] = "Ayarlar",
-                ["language"] = "Dil",
-                ["resetAll"] = "TÃ¼mÃ¼nÃ¼ sÄ±fÄ±rla",
-                ["resetConfirm"] = "TÃ¼m programlarÄ± ve kategorileri silmek istediÄŸinizden emin misiniz?",
-                ["resetTitle"] = "Silmeyi onayla",
-                ["resetDone"] = "TÃ¼m programlar ve kategoriler silindi.",
-                ["limitReached"] = "En fazla {0} program ekleyebilirsiniz.",
-                ["selectFile"] = "Eklenecek bir program veya kÄ±sayol seÃ§in",
-                ["fileFilter"] = "Programlar ve kÄ±sayollar (*.exe;*.lnk)|*.exe;*.lnk|Program dosyalarÄ± (*.exe)|*.exe|KÄ±sayollar (*.lnk)|*.lnk|TÃ¼m dosyalar (*.*)|*.*",
-                ["noSelection"] = "SeÃ§im yok",
-                ["selectProgramRemove"] = "KaldÄ±rmak iÃ§in en az bir program seÃ§in.",
-                ["selectProgramEdit"] = "DÃ¼zenlemek iÃ§in bir program seÃ§in.",
-                ["editNameTitle"] = "Program adÄ±nÄ± dÃ¼zenle",
-                ["newName"] = "Yeni ad:",
-                ["ok"] = "Tamam",
-                ["cancel"] = "Ä°ptal",
-                ["addCategoryTitle"] = "Kategori ekle",
-                ["categoryName"] = "Kategori adÄ±:",
-                ["categoryAdded"] = "'{0}' kategorisi eklendi!",
-                ["categoryExists"] = "Kategori zaten mevcut.",
-                ["categoryRemoved"] = "'{0}' kategorisi kaldÄ±rÄ±ldÄ±!",
-                ["cannotRemoveDefault"] = "VarsayÄ±lan kategori kaldÄ±rÄ±lamaz.",
-                ["programsInCategory"] = "'{1}' kategorisinde {0} program var.\n\nBunlarÄ± varsayÄ±lan kategoriye taÅŸÄ±mak ister misiniz?",
-                ["error"] = "Hata",
-                ["programCount"] = "Program: {0}/{1}",
-                ["couldNotLoad"] = "YÃ¼klenemedi: {0}",
-                ["couldNotSave"] = "Kaydedilemedi: {0}",
-                ["couldNotStart"] = "BaÅŸlatÄ±lamadÄ±: {0}",
-                ["selectCategoryRemove"] = "KaldÄ±rmak iÃ§in bir kategori seÃ§in.",
-                ["editCategory"] = "Kategoriyi dÃ¼zenle",
-                ["editCategoryTitle"] = "Kategori adÄ±nÄ± dÃ¼zenle",
-                ["selectCategoryEdit"] = "DÃ¼zenlemek iÃ§in bir kategori seÃ§in.",
-                ["cannotEditDefault"] = "VarsayÄ±lan kategori dÃ¼zenlenemez.",
-                ["categoryRenamed"] = "'{0}' kategorisinin adÄ± '{1}' olarak deÄŸiÅŸtirildi!",
-                ["theme"] = "Tema",
-                ["dark"] = "KaranlÄ±k",
-                ["light"] = "AydÄ±nlÄ±k",
-                ["moveToCategory"] = "Kategoriye taÅŸÄ±",
-                ["contextDelete"] = "Sil",
-                ["contextRename"] = "AdÄ±nÄ± deÄŸiÅŸtir",
-            }
-        };
 
-        private string T(string key)
-        {
-            if (Strings.TryGetValue(currentLanguage, out var dict) && dict.TryGetValue(key, out var val))
-                return val;
-            if (Strings["en"].TryGetValue(key, out var fallback))
-                return fallback;
-            return key;
-        }
+        private Label titleLabel = default!;
+        private Label catLabel = default!;
+        private Panel categoryPanel = default!;
+        private Panel programPanel = default!;
+        private TextBox searchBox = default!;
+        private Label statusLabel = default!;
+        private Label copyrightLabel = default!;
+        private NotifyIcon notifyIcon = default!;
+        private ContextMenuStrip contextMenu = default!;
+        private Panel mainContainer = default!;
 
-        private static void LogDebug(string context, Exception ex)
-        {
-            Debug.WriteLine($"[{nameof(MainForm)}::{context}] {ex}");
-        }
-
-        private static bool IsDefaultCategoryAlias(string? name)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return true;
-            }
-
-            return DefaultCategoryAliases.Contains(name.Trim());
-        }
-
-        private void DisposeClickTimer()
-        {
-            if (clickTimer == null)
-            {
-                return;
-            }
-
-            clickTimer.Stop();
-            clickTimer.Dispose();
-            clickTimer = null;
-        }
-
-        private void RebuildTrayIcon()
-        {
-            DisposeClickTimer();
-            leftClickMenu?.Dispose();
-            leftClickMenu = null;
-            contextMenu?.Dispose();
-            contextMenu = null;
-            notifyIcon?.Dispose();
-            notifyIcon = null;
-            SetupNotifyIcon();
-        }
+        private Control? draggedControl;
+        private ProgramItem? draggedProgram;
+        private int draggedIndex = -1;
+        private Point dragOffset;
+        private bool isDragging = false;
+        
+        private System.Windows.Forms.Timer statusTimer;
+        private bool currentIsDark = true;
 
         public MainForm()
         {
             EnsureDataFolder();
             LoadSettings();
-            InitializeComponent();
             LoadCategories();
             LoadPrograms();
-            ApplyTheme();
-            this.Icon = GenerateAppIcon();
+            
+            InitializeComponent();
             SetupNotifyIcon();
-            this.WindowState = FormWindowState.Minimized;
-            this.ShowInTaskbar = false;
+            
+            RegisterHotKey(this.Handle, HOTKEY_ID, MOD_CONTROL | MOD_ALT, VK_W);
+            RefreshCategories();
+            RefreshProgramList();
         }
 
         private void EnsureDataFolder()
         {
-            try
-            {
-                if (!Directory.Exists(AppDataFolder))
-                {
-                    Directory.CreateDirectory(AppDataFolder);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogDebug(nameof(EnsureDataFolder), ex);
-            }
+            if (!Directory.Exists(AppDataFolder)) Directory.CreateDirectory(AppDataFolder);
         }
 
         private void InitializeComponent()
         {
             this.Text = "WindowsSmartTaskbar";
-            this.Size = new Size(420, 700);
+            this.Size = new Size(500, 850);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
-            this.BackColor = currentTheme == "dark" ? Color.FromArgb(32, 32, 32) : Color.FromArgb(245, 245, 250);
-
-            // Huvudpanel
-            var mainPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(10)
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.BackColor = Color.FromArgb(18, 18, 21);
+            
+            Action<object, MouseEventArgs> dragAction = (s, e) => {
+                if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); }
             };
 
-            // Titellabel
-            titleLabel = new Label
-            {
-                Text = T("title"),
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                Dock = DockStyle.Top,
-                Height = 40,
-                TextAlign = ContentAlignment.MiddleCenter,
-                ForeColor = Color.FromArgb(0, 120, 215)
-            };
+            this.MouseDown += (s, e) => dragAction(s, e);
 
-            // KategorivÃ¤ljare
-            var categoryPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                Height = 35,
-                FlowDirection = FlowDirection.LeftToRight
-            };
+            mainContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(20) };
+            mainContainer.MouseDown += (s, e) => dragAction(s, e);
+            this.Controls.Add(mainContainer);
 
-            categoryLabel = new Label
-            {
-                Text = T("category"),
-                Width = 65,
-                Height = 30,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font("Segoe UI", 9)
-            };
+            var titleContainer = new Panel { Dock = DockStyle.Top, Height = 85, Padding = new Padding(0, 0, 0, 15) };
+            titleContainer.MouseDown += (s, e) => dragAction(s, e);
+            
+            var titleBack = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Padding = new Padding(10) };
+            titleBack.SizeChanged += (s, e) => SetRoundedRegion(titleBack, 20);
+            titleBack.MouseDown += (s, e) => dragAction(s, e);
 
-            categoryComboBox = new ComboBox
-            {
-                Width = 220,
-                Height = 30,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9)
-            };
-            categoryComboBox.SelectedIndexChanged += CategoryComboBox_SelectedIndexChanged;
+            titleLabel = new Label { Text = "WindowsSmartTaskbar", Font = new Font("Segoe UI Semibold", 16), ForeColor = Color.White, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+            titleLabel.MouseDown += (s, e) => dragAction(s, e);
 
-            categoryPanel.Controls.Add(categoryLabel);
-            categoryPanel.Controls.Add(categoryComboBox);
+            var controlButtons = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 70, FlowDirection = FlowDirection.RightToLeft, BackColor = Color.Transparent };
+            
+            var closeBtn = new Label { Text = "\uE8BB", Font = new Font("Segoe MDL2 Assets", 10), ForeColor = Color.White, Size = new Size(35, 30), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+            closeBtn.MouseEnter += (s, e) => closeBtn.BackColor = Color.FromArgb(232, 17, 35);
+            closeBtn.MouseLeave += (s, e) => closeBtn.BackColor = Color.Transparent;
+            closeBtn.Click += (s, e) => this.Hide(); // Hide to tray instead of exit for taskbar app
 
-            // Knapppanel
-            var buttonPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                Height = 135,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Padding = new Padding(0, 5, 0, 5)
-            };
+            var minBtn = new Label { Text = "\uE921", Font = new Font("Segoe MDL2 Assets", 10), ForeColor = Color.White, Size = new Size(35, 30), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+            minBtn.MouseEnter += (s, e) => minBtn.BackColor = Color.FromArgb(64, 64, 64);
+            minBtn.MouseLeave += (s, e) => minBtn.BackColor = Color.Transparent;
+            minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
 
-            addButton = CreateButton(T("addProgram"), Color.FromArgb(0, 120, 215), Color.White, 120);
-            addButton.Click += AddButton_Click;
+            controlButtons.Controls.Add(closeBtn);
+            controlButtons.Controls.Add(minBtn);
+            
+            titleBack.Controls.Add(controlButtons);
+            titleBack.Controls.Add(titleLabel);
+            titleContainer.Controls.Add(titleBack);
 
-            removeButton = CreateButton(T("remove"), Color.FromArgb(220, 53, 69), Color.White, 80);
-            removeButton.Click += RemoveButton_Click;
+            categoryPanel = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(0, 5, 0, 15), BackColor = Color.Transparent };
+            var catCard = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Cursor = Cursors.Hand };
+            catCard.SizeChanged += (s, e) => { SetRoundedRegion(catCard, 20); catLabel.Width = catCard.Width - 60; };
+            catLabel = new Label { Text = currentCategory, Font = new Font("Segoe UI Semibold", 13), ForeColor = Color.White, Dock = DockStyle.Left, Width = 350, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(15, 0, 0, 0), Enabled = false, BackColor = Color.Transparent };
+            var catChevron = new Label { Text = "\uE70D", Font = new Font("Segoe MDL2 Assets", 12), ForeColor = Color.Gray, Dock = DockStyle.Right, Width = 60, TextAlign = ContentAlignment.MiddleCenter, Enabled = false, BackColor = Color.Transparent };
+            catCard.Controls.Add(catLabel); catCard.Controls.Add(catChevron);
+            catCard.Click += (s, e) => ShowCategoryMenu(catCard);
+            categoryPanel.Controls.Add(catCard);
+            categoryPanel.MouseDown += (s, e) => dragAction(s, e);
 
-            editButton = CreateButton(T("editName"), Color.FromArgb(255, 193, 7), Color.Black, 105);
-            editButton.Click += EditButton_Click;
+            var actionGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 110, ColumnCount = 4, RowCount = 1 };
+            // ... existing grid setup ...
+            actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
 
-            categoryButton = CreateButton(T("addCategory"), Color.FromArgb(40, 167, 69), Color.White, 115);
-            categoryButton.Click += CategoryButton_Click;
+            var btnAdd = CreateActionItem("\uE109", T("addProgram"), Color.FromArgb(0, 120, 215), AddButton_Click);
+            var btnRemove = CreateActionItem("\uE107", T("remove"), Color.FromArgb(220, 53, 69), RemoveButton_Click);
+            var btnEdit = CreateActionItem("\uE104", T("editName"), Color.FromArgb(255, 193, 7), EditButton_Click);
+            var btnCat = CreateActionItem("\uE188", T("addCategory"), Color.FromArgb(40, 167, 69), CategoryButton_Click);
 
-            removeCategoryButton = CreateButton(T("removeCategory"), Color.FromArgb(220, 53, 69), Color.White, 115);
-            removeCategoryButton.Click += RemoveCategoryButton_Click;
+            actionGrid.Controls.Add(btnAdd, 0, 0);
+            actionGrid.Controls.Add(btnRemove, 1, 0);
+            actionGrid.Controls.Add(btnEdit, 2, 0);
+            actionGrid.Controls.Add(btnCat, 3, 0);
 
-            editCategoryButton = CreateButton(T("editCategory"), Color.FromArgb(255, 193, 7), Color.Black, 115);
-            editCategoryButton.Click += EditCategoryButton_Click;
+            var searchContainer = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(0, 15, 0, 15) };
+            searchContainer.MouseDown += (s, e) => dragAction(s, e);
 
-            buttonPanel.Controls.Add(addButton);
-            buttonPanel.Controls.Add(removeButton);
-            buttonPanel.Controls.Add(editButton);
-            buttonPanel.Controls.Add(categoryButton);
-            buttonPanel.Controls.Add(removeCategoryButton);
-            buttonPanel.Controls.Add(editCategoryButton);
+            var searchPill = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Padding = new Padding(15, 10, 15, 5) };
+            searchPill.SizeChanged += (s, e) => SetRoundedRegion(searchPill, 22);
+            searchBox = new TextBox { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White, Font = new Font("Segoe UI", 12), PlaceholderText = T("search") };
+            searchBox.TextChanged += (s, e) => { searchFilter = searchBox.Text; RefreshProgramList(); };
+            searchPill.Controls.Add(searchBox);
+            searchContainer.Controls.Add(searchPill);
 
-            // Programpanel (scrollbar panel istÃ¤llet fÃ¶r ListBox)
-            programPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                AutoScroll = true,
-                BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White,
-                BorderStyle = currentTheme == "dark" ? BorderStyle.None : BorderStyle.FixedSingle,
-                Padding = new Padding(0)
-            };
+            programPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 0) };
+            programPanel.MouseDown += (s, e) => dragAction(s, e);
 
-            // Statuslabel with copyright
-            var bottomPanel = new Panel
-            {
-                Dock = DockStyle.Bottom,
-    Height = 60
-            };
+            var footer = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Color.FromArgb(30,30,35) };
+            footer.MouseDown += (s, e) => dragAction(s, e);
+            statusLabel = new Label { Text = "0/20 Programs", Dock = DockStyle.Left, Width = 150, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(20, 0, 0, 0), Font = new Font("Segoe UI", 10) };
+            copyrightLabel = new Label { Text = "Created 2026 by \u00A9 nRn World", Dock = DockStyle.Fill, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 20, 0), Font = new Font("Segoe UI", 10) };
+            footer.Controls.Add(statusLabel);
+            footer.Controls.Add(copyrightLabel);
 
-            statusLabel = new Label
-            {
-                Text = string.Format(T("programCount"), 0, MaxPrograms),
-                Dock = DockStyle.Left,
-                Width = 150,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Color.Gray
-            };
-
-            copyrightLabel = new Label
-            {
-                Text = "Created 2026 by Â© nRn World",
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleRight,
-                Font = new Font("Segoe UI", 8),
-                ForeColor = Color.Gray,
-                Padding = new Padding(0, 0, 10, 0),
-                AutoSize = false
-            };
-
-            bottomPanel.Controls.Add(copyrightLabel);
-            bottomPanel.Controls.Add(statusLabel);
-
-            // OBS: Ordning Ã¤r viktig fÃ¶r WinForms docking
-            // LÃ¤gg till i omvÃ¤nd ordning: Bottom fÃ¶rst, sedan Fill, sedan Top
-            mainPanel.Controls.Add(programPanel);      // Fill - ska vara fÃ¶rst
-            mainPanel.Controls.Add(bottomPanel);             // Bottom
-            mainPanel.Controls.Add(buttonPanel);        // Top
-            mainPanel.Controls.Add(categoryPanel);      // Top
-            mainPanel.Controls.Add(titleLabel);         // Top
-
-            this.Controls.Add(mainPanel);
+            mainContainer.Controls.Add(programPanel);
+            mainContainer.Controls.Add(footer);
+            mainContainer.Controls.Add(searchContainer);
+            mainContainer.Controls.Add(actionGrid);
+            mainContainer.Controls.Add(categoryPanel);
+            mainContainer.Controls.Add(titleContainer);
         }
 
-        private Button CreateButton(string text, Color backColor, Color foreColor, int width)
+        private Control CreateActionItem(string icon, string labelText, Color iconBack, EventHandler handler)
         {
-            var btn = new Button
-            {
-                Text = text,
-                Width = width,
-                Height = 35,
-                BackColor = backColor,
-                ForeColor = foreColor,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9),
-                Cursor = Cursors.Hand
-            };
-            btn.FlatAppearance.BorderSize = 0;
-            return btn;
+            var pnl = new Panel { Dock = DockStyle.Fill, Cursor = Cursors.Hand };
+            var iconBox = new Label { Text = icon, Font = new Font("Segoe MDL2 Assets", 18), ForeColor = Color.White, BackColor = iconBack, Size = new Size(50, 50), TextAlign = ContentAlignment.MiddleCenter };
+            iconBox.SizeChanged += (s, e) => SetRoundedRegion(iconBox, 15);
+            var lbl = new Label { Text = labelText, ForeColor = Color.Gray, Font = new Font("Segoe UI", 8), Dock = DockStyle.Bottom, Height = 35, TextAlign = ContentAlignment.TopCenter };
+            pnl.Controls.Add(iconBox); pnl.Controls.Add(lbl);
+            pnl.Resize += (s, e) => { iconBox.Left = (pnl.Width - iconBox.Width) / 2; iconBox.Top = 5; };
+            
+            pnl.Click += handler;
+            iconBox.Click += (s, e) => handler(pnl, e);
+            lbl.Click += (s, e) => handler(pnl, e);
+            return pnl;
+        }
+
+        private void SetRoundedRegion(Control control, int radius)
+        {
+            try {
+                IntPtr ptr = CreateRoundRectRgn(0, 0, control.Width + 1, control.Height + 1, radius, radius);
+                control.Region = Region.FromHrgn(ptr);
+            } catch {}
         }
 
         private void SetupNotifyIcon()
         {
-            DisposeClickTimer();
-
-            notifyIcon = new NotifyIcon
-            {
-                Text = "WindowsSmartTaskbar",
-                Visible = true
-            };
-
+            notifyIcon = new NotifyIcon { Text = "WindowsSmartTaskbar", Visible = true };
             notifyIcon.Icon = GenerateAppIcon();
             contextMenu = new ContextMenuStrip();
-
             var showMenuItem = new ToolStripMenuItem(T("showPrograms"));
             showMenuItem.Click += (s, e) => ShowProgramList();
             contextMenu.Items.Add(showMenuItem);
-
-            contextMenu.Items.Add(new ToolStripSeparator());
-
-            var autostartMenuItem = new ToolStripMenuItem(T("startWithWindows"))
-            {
-                CheckOnClick = true,
-                Checked = IsAutostartEnabled()
-            };
-            autostartMenuItem.Click += (s, e) => SetAutostart(autostartMenuItem.Checked);
-            contextMenu.Items.Add(autostartMenuItem);
-
-            // Settings submenu
-            var settingsMenu = new ToolStripMenuItem(T("settings"));
-
-            // Language submenu
-            var langMenu = new ToolStripMenuItem(T("language"));
-            var svItem = new ToolStripMenuItem("Svenska") { Tag = "sv", Checked = currentLanguage == "sv" };
-            var enItem = new ToolStripMenuItem("English") { Tag = "en", Checked = currentLanguage == "en" };
-            var trItem = new ToolStripMenuItem("TÃ¼rkÃ§e") { Tag = "tr", Checked = currentLanguage == "tr" };
-
-            svItem.Click += (s, e) => ChangeLanguage("sv");
-            enItem.Click += (s, e) => ChangeLanguage("en");
-            trItem.Click += (s, e) => ChangeLanguage("tr");
-
-            langMenu.DropDownItems.AddRange(new ToolStripItem[] { svItem, enItem, trItem });
-            settingsMenu.DropDownItems.Add(langMenu);
-
-            // Theme submenu
-            var themeMenu = new ToolStripMenuItem(T("theme"));
-            var darkItem = new ToolStripMenuItem(T("dark")) { Tag = "dark", Checked = currentTheme == "dark" };
-            var lightItem = new ToolStripMenuItem(T("light")) { Tag = "light", Checked = currentTheme == "light" };
-
-            darkItem.Click += (s, e) => ChangeTheme("dark");
-            lightItem.Click += (s, e) => ChangeTheme("light");
-
-            themeMenu.DropDownItems.AddRange(new ToolStripItem[] { darkItem, lightItem });
-            settingsMenu.DropDownItems.Add(themeMenu);
-
-            // Reset all
-            var resetItem = new ToolStripMenuItem(T("resetAll"));
-            resetItem.Click += ResetAllButton_Click;
-            settingsMenu.DropDownItems.Add(resetItem);
-
-            contextMenu.Items.Add(settingsMenu);
-
-            contextMenu.Items.Add(new ToolStripSeparator());
-
             var exitMenuItem = new ToolStripMenuItem(T("exit"));
             exitMenuItem.Click += (s, e) => Application.Exit();
             contextMenu.Items.Add(exitMenuItem);
-
             notifyIcon.ContextMenuStrip = contextMenu;
-
-            var timer = new System.Windows.Forms.Timer
-            {
-                Interval = SystemInformation.DoubleClickTime
-            };
-            timer.Tick += (s, e) =>
-            {
-                timer.Stop();
-                BuildQuickLaunchMenu();
-                SetForegroundWindow(this.Handle); // Ensure focus for menu
-                leftClickMenu?.Show(Cursor.Position);
-            };
-            clickTimer = timer;
-
-            notifyIcon.MouseClick += (s, e) => 
-            { 
-                if (e.Button == MouseButtons.Left) 
-                {
-                    timer.Start();
-                }
-            };
             
-            notifyIcon.MouseDoubleClick += (s, e) => 
-            { 
-                if (e.Button == MouseButtons.Left) 
-                {
-                    timer.Stop();
-                    ShowProgramList(); 
-                }
-            };
+            notifyIcon.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowProgramList(); };
         }
 
-        private void BuildQuickLaunchMenu()
+        protected override void WndProc(ref Message m)
         {
-            if (leftClickMenu == null)
-            {
-                leftClickMenu = new ContextMenuStrip();
-            }
-            else
-            {
-                leftClickMenu.Items.Clear();
-            }
-
-            foreach (var cat in categories)
-            {
-                var displayName = cat.Name == DefaultCategory ? T("allPrograms") : cat.Name;
-                var catItem = new ToolStripMenuItem(displayName);
-                if (!string.IsNullOrWhiteSpace(cat.Color))
-                {
-                    try
-                    {
-                        catItem.ForeColor = ColorTranslator.FromHtml(cat.Color);
-                    }
-                    catch (Exception ex)
-                    {
-                        LogDebug(nameof(BuildQuickLaunchMenu), ex);
-                    }
-                }
-                
-                var categoryPrograms = programs.Where(p => p.Category == cat.Name).ToList();
-                if (cat.Name == DefaultCategory)
-                {
-                    categoryPrograms = programs.ToList();
-                }
-
-                foreach (var prog in categoryPrograms)
-                {
-                    var progItem = new ToolStripMenuItem(prog.Name);
-                    if (prog.Icon != null)
-                    {
-                        try { progItem.Image = prog.Icon.ToBitmap(); }
-                        catch (Exception ex) { LogDebug(nameof(BuildQuickLaunchMenu), ex); }
-                    }
-                    progItem.Click += (s, e) => prog.Start();
-                    catItem.DropDownItems.Add(progItem);
-                }
-
-                if (catItem.DropDownItems.Count > 0 || cat.Name == DefaultCategory)
-                {
-                    leftClickMenu.Items.Add(catItem);
-                }
-            }
-
-            if (leftClickMenu.Items.Count == 0)
-            {
-                leftClickMenu.Items.Add(new ToolStripMenuItem(T("noSelection")) { Enabled = false });
+            base.WndProc(ref m);
+            if (m.Msg == 0x0084 && (int)m.Result == 0x1) { m.Result = (IntPtr)0x2; } // HTCLIENT to HTCAPTION for smooth dragging
+            if (m.Msg == 0x001A) { // WM_SETTINGCHANGE
+                ApplyTheme();
             }
         }
 
-        private Icon GenerateAppIcon()
+        private void ShowCategoryMenu(Control target)
         {
-            // Skapa en modern ikon programmatiskt
-            int size = 256;
-            using (Bitmap bmp = new Bitmap(size, size))
-            {
-                using (Graphics g = Graphics.FromImage(bmp))
-                {
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
-                    g.Clear(Color.Transparent);
-
-                    // Bakgrund: BlÃ¥ gradient cirkel
-                    Rectangle rect = new Rectangle(10, 10, size - 20, size - 20);
-                    using (var path = new System.Drawing.Drawing2D.GraphicsPath())
-                    {
-                        path.AddEllipse(rect);
-                        using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(rect, 
-                            Color.FromArgb(0, 120, 215), // Windows Blue
-                            Color.FromArgb(0, 60, 140),  // Darker Blue
-                            45f))
-                        {
-                            g.FillPath(brush, path);
-                        }
-                    }
-
-                    // Symbol: Vita streck (launcher-koncept)
-                    using (Pen pen = new Pen(Color.White, 16))
-                    {
-                        pen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
-                        pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-
-                        int centerX = size / 2;
-                        int centerY = size / 2;
-                        
-                        // Tre horisontella streck
-                        g.DrawLine(pen, centerX - 60, centerY - 45, centerX + 60, centerY - 45);
-                        g.DrawLine(pen, centerX - 60, centerY, centerX + 30, centerY);
-                        g.DrawLine(pen, centerX - 60, centerY + 45, centerX + 10, centerY + 45);
-                        
-                        // En liten accent-prick
-                        g.FillEllipse(Brushes.White, centerX + 40, centerY + 35, 20, 20);
-                    }
-                }
-                IntPtr hIcon = bmp.GetHicon();
-                try
-                {
-                    using (var icon = Icon.FromHandle(hIcon))
-                    {
-                        return (Icon)icon.Clone();
-                    }
-                }
-                finally
-                {
-                    DestroyIcon(hIcon);
-                }
-            }
-        }
-
-        private void ChangeLanguage(string lang)
-        {
-            currentLanguage = lang;
-            SaveSettings();
-
-            // Update all UI text
-            if (titleLabel != null) titleLabel.Text = T("title");
-            if (categoryLabel != null) categoryLabel.Text = T("category");
-            if (addButton != null) addButton.Text = T("addProgram");
-            if (removeButton != null) removeButton.Text = T("remove");
-            if (editButton != null) editButton.Text = T("editName");
-            if (categoryButton != null) categoryButton.Text = T("addCategory");
-            if (removeCategoryButton != null) removeCategoryButton.Text = T("removeCategory");
-            UpdateStatus();
-            LoadCategories();
-
-            // Rebuild the tray menu
-            RebuildTrayIcon();
-        }
-
-        private void ResetAllButton_Click(object? sender, EventArgs e)
-        {
-            var result = MessageBox.Show(T("resetConfirm"), T("resetTitle"),
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (result == DialogResult.Yes)
-            {
-                programs.Clear();
-                categories.Clear();
-                categories.Add(new Category(DefaultCategory));
-                SavePrograms();
-                SaveCategories();
-                LoadCategories();
-                RefreshProgramList();
-                MessageBox.Show(T("resetDone"), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-        }
-
-        private void ChangeTheme(string theme)
-        {
-            currentTheme = theme;
-            SaveSettings();
-            ApplyTheme();
-
-            // Refresh tray menu to update checkmarks
-            RebuildTrayIcon();
-        }
-
-        private void ApplyTheme()
-        {
-            Color bgColor = currentTheme == "dark" ? Color.FromArgb(32, 32, 32) : Color.FromArgb(245, 245, 250);
-            Color panelBg = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
-            Color textColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30);
-            Color secondaryTextColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray;
-            Color borderColor = currentTheme == "dark" ? Color.FromArgb(60, 60, 60) : Color.FromArgb(230, 230, 230);
-
-            this.BackColor = bgColor;
-            
-            if (programPanel != null)
-            {
-                programPanel.BackColor = panelBg;
-                programPanel.BorderStyle = currentTheme == "dark" ? BorderStyle.None : BorderStyle.FixedSingle;
-            }
-
-            if (categoryLabel != null) categoryLabel.ForeColor = textColor;
-            if (statusLabel != null) statusLabel.ForeColor = secondaryTextColor;
-            if (copyrightLabel != null) copyrightLabel.ForeColor = secondaryTextColor;
-
-            // Update nested controls if any
-            RefreshProgramList();
-        }
-
-        private bool autostartEnabled = true; // Standard vÃ¤rde
-
-        private void LoadSettings()
-        {
-            try
-            {
-                bool isFirstRun = false;
-                if (File.Exists(SettingsFile))
-                {
-                    var json = File.ReadAllText(SettingsFile);
-                    var settings = JsonSerializer.Deserialize<AppSettings>(json);
-                    if (settings != null)
-                    {
-                        currentLanguage = settings.Language ?? "en";
-                        currentTheme = settings.Theme ?? "dark";
-                        autostartEnabled = settings.Autostart ?? true; // Standard true
-                    }
-                    else
-                    {
-                        isFirstRun = true;
-                    }
-                }
-                else
-                {
-                    isFirstRun = true;
-                }
-
-                // Om det Ã¤r fÃ¶rsta kÃ¶rningen, spara standardinstÃ¤llningarna
-                if (isFirstRun)
-                {
-                    autostartEnabled = true;
-                    SaveSettings();
-                }
-
-                SyncAutostartState();
-            }
-            catch (Exception ex)
-            {
-                LogDebug(nameof(LoadSettings), ex);
-            }
-        }
-
-        private void SaveSettings()
-        {
-            try
-            {
-                var settings = new AppSettings 
-                { 
-                    Language = currentLanguage,
-                    Theme = currentTheme,
-                    Autostart = autostartEnabled
+            var cms = new ContextMenuStrip { BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White, ShowImageMargin = false, ShowCheckMargin = false };
+            foreach (var cat in categories) {
+                var item = new ToolStripMenuItem(cat.Name == DefaultCategory ? T("allPrograms") : cat.Name);
+                item.Click += (s, e) => {
+                    currentCategory = cat.Name;
+                    RefreshCategories();
+                    RefreshProgramList();
                 };
-                var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(SettingsFile, json);
+                cms.Items.Add(item);
             }
-            catch (Exception ex)
-            {
-                LogDebug(nameof(SaveSettings), ex);
-            }
+            cms.Show(target, new Point(0, target.Height));
         }
 
-        private bool IsAutostartEnabled()
+        private void ToggleVisibility()
         {
-            // Returnera den sparade instÃ¤llningen frÃ¥n AppSettings
-            return autostartEnabled && IsAutostartRegistered();
-        }
-
-        private void SetAutostart(bool enable)
-        {
-            bool previousValue = autostartEnabled;
-
-            try
-            {
-                ApplyAutostartToRegistry(enable);
-                autostartEnabled = enable;
-                SaveSettings();
-            }
-            catch (Exception ex)
-            {
-                autostartEnabled = previousValue;
-                MessageBox.Show(string.Format(T("couldNotSave"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private void SyncAutostartState()
-        {
-            try
-            {
-                ApplyAutostartToRegistry(autostartEnabled);
-            }
-            catch (Exception ex)
-            {
-                LogDebug(nameof(SyncAutostartState), ex);
-            }
-        }
-
-        private bool IsAutostartRegistered()
-        {
-            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
-            {
-                var raw = key?.GetValue("WindowsSmartTaskbar") as string;
-                if (string.IsNullOrWhiteSpace(raw))
-                    return false;
-
-                return string.Equals(raw, BuildAutostartCommand(), StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        private void ApplyAutostartToRegistry(bool enable)
-        {
-            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
-            {
-                if (key == null) return;
-                if (enable)
-                {
-                    key.SetValue("WindowsSmartTaskbar", BuildAutostartCommand());
-                }
-                else
-                {
-                    key.DeleteValue("WindowsSmartTaskbar", false);
-                }
-            }
-        }
-
-        private string BuildAutostartCommand()
-        {
-            return $"\"{Application.ExecutablePath}\"";
+            if (this.Visible && this.WindowState != FormWindowState.Minimized) this.Hide();
+            else ShowProgramList();
         }
 
         private void ShowProgramList()
         {
-            clickTimer?.Stop();
-            leftClickMenu?.Hide();
-            leftClickMenu?.Close();
-
             this.ShowInTaskbar = true;
-            if (this.WindowState == FormWindowState.Minimized)
-                this.WindowState = FormWindowState.Normal;
-            
+            this.WindowState = FormWindowState.Normal;
             this.Show();
-            this.Activate();
-            this.BringToFront();
+            this.TopMost = true; this.Activate(); this.BringToFront(); this.Focus();
             SetForegroundWindow(this.Handle);
+            this.TopMost = false;
         }
 
-        // ========== Program List Display (Panel-based, no OwnerDraw) ==========
+        private void RefreshCategories()
+        {
+            if (categoryPanel == null || categoryPanel.Controls.Count == 0) return;
+            var card = categoryPanel.Controls[0];
+            var lbl = card.Controls.OfType<Label>().FirstOrDefault(l => l.Dock == DockStyle.Left);
+            if (lbl != null) lbl.Text = currentCategory == DefaultCategory ? T("allPrograms") : currentCategory;
+        }
 
         private void RefreshProgramList()
         {
             if (programPanel == null) return;
-
             programPanel.SuspendLayout();
-            var oldControls = programPanel.Controls.Cast<Control>().ToArray();
-            programPanel.Controls.Clear();
-            foreach (var control in oldControls)
-            {
-                control.Dispose();
-            }
-            selectedIndices.Clear();
-
-            // Filter programs
-            var filtered = currentCategory == DefaultCategory
-                ? programs.ToList()
-                : programs.Where(p => p.Category == currentCategory).ToList();
-
-            // Add program panels in reverse so Dock.Top stacks them correctly
-            for (int i = filtered.Count - 1; i >= 0; i--)
-            {
-                var panel = CreateProgramRow(filtered[i], i);
-                programPanel.Controls.Add(panel);
-            }
-
+            programPanel.Controls.Clear(); selectedIndices.Clear();
+            var filtered = currentCategory == DefaultCategory ? programs.ToList() : programs.Where(p => p.Category == currentCategory).ToList();
+            if (!string.IsNullOrWhiteSpace(searchFilter)) filtered = filtered.Where(p => p.Name.Contains(searchFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+            for (int i = filtered.Count - 1; i >= 0; i--) programPanel.Controls.Add(CreateProgramRow(filtered[i], i));
             programPanel.ResumeLayout();
             UpdateStatus();
+            
+            this.AllowDrop = true;
+            this.DragEnter += MainForm_DragEnter;
+            this.DragDrop += MainForm_DragDrop;
+
+            statusTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+            statusTimer.Tick += StatusTimer_Tick;
+            statusTimer.Start();
+
+            ApplyTheme();
         }
 
         private Panel CreateProgramRow(ProgramItem program, int index)
         {
-            var row = new Panel
-            {
-                Height = 50,
-                Dock = DockStyle.Top,
-                BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White,
-                Cursor = Cursors.Hand,
-                Tag = index
-            };
-
-            // Bottom border
-            var border = new Panel
-            {
-                Height = 1,
-                Dock = DockStyle.Bottom,
-                BackColor = currentTheme == "dark" ? Color.FromArgb(60, 60, 60) : Color.FromArgb(230, 230, 230)
-            };
-
-            // Icon
-            var iconBox = new PictureBox
-            {
-                Size = new Size(32, 32),
-                Location = new Point(8, 9),
-                SizeMode = PictureBoxSizeMode.StretchImage,
-                BackColor = Color.Transparent
-            };
-            try
-            {
-                if (program.Icon != null)
-                    iconBox.Image = program.Icon.ToBitmap();
-            }
-            catch (Exception ex)
-            {
-                LogDebug(nameof(CreateProgramRow), ex);
-            }
-
-            // Program name
-            var nameLabel = new Label
-            {
-                Text = program.Name,
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30),
-                Location = new Point(48, 4),
-                AutoSize = false,
-                Size = new Size(320, 22),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            // File path
-            var pathLabel = new Label
-            {
-                Text = Path.GetFileName(program.FilePath),
-                Font = new Font("Segoe UI", 8),
-                ForeColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray,
-                Location = new Point(48, 26),
-                AutoSize = false,
-                Size = new Size(320, 18),
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            row.Controls.Add(iconBox);
-            row.Controls.Add(nameLabel);
-            row.Controls.Add(pathLabel);
-            row.Controls.Add(border);
-
-            // Click events for selection
-            Action<object?, MouseEventArgs> clickHandler = (s, args) =>
-            {
-                int idx = (int)row.Tag;
-                var rowColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
-                if (Control.ModifierKeys.HasFlag(Keys.Control))
-                {
-                    // Toggle selection
-                    if (selectedIndices.Contains(idx))
-                    {
-                        selectedIndices.Remove(idx);
-                        row.BackColor = rowColor;
-                        nameLabel.BackColor = rowColor;
-                        pathLabel.BackColor = rowColor;
-                        nameLabel.ForeColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30);
-                        pathLabel.ForeColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray;
-                    }
-                    else
-                    {
-                        selectedIndices.Add(idx);
-                        row.BackColor = Color.FromArgb(0, 120, 215);
-                        nameLabel.BackColor = Color.FromArgb(0, 120, 215);
-                        nameLabel.ForeColor = Color.White;
-                        pathLabel.BackColor = Color.FromArgb(0, 120, 215);
-                        pathLabel.ForeColor = Color.FromArgb(200, 200, 255);
-                    }
-                }
-                else
-                {
-                    // Single selection - deselect all, select this one
-                    DeselectAllRows();
-                    selectedIndices.Clear();
-                    selectedIndices.Add(idx);
-                    row.BackColor = Color.FromArgb(0, 120, 215);
-                    nameLabel.BackColor = Color.FromArgb(0, 120, 215);
-                    nameLabel.ForeColor = Color.White;
-                    pathLabel.BackColor = Color.FromArgb(0, 120, 215);
-                    pathLabel.ForeColor = Color.FromArgb(200, 200, 255);
-                }
-
-                // Double-click: start program
-                if (args is MouseEventArgs me && me.Clicks >= 2)
-                {
-                    var filtered = currentCategory == DefaultCategory
-                        ? programs.ToList()
-                        : programs.Where(p => p.Category == currentCategory).ToList();
-                    if (idx < filtered.Count)
-                        filtered[idx].Start();
-                }
-            };
-
-            row.MouseClick += (s, e) => clickHandler(s, e);
-            iconBox.MouseClick += (s, e) => clickHandler(s, e);
-            nameLabel.MouseClick += (s, e) => clickHandler(s, e);
-            pathLabel.MouseClick += (s, e) => clickHandler(s, e);
-
-            row.MouseDoubleClick += (s, e) => clickHandler(s, new MouseEventArgs(e.Button, 2, e.X, e.Y, e.Delta));
-            nameLabel.MouseDoubleClick += (s, e) => clickHandler(s, new MouseEventArgs(e.Button, 2, e.X, e.Y, e.Delta));
-            pathLabel.MouseDoubleClick += (s, e) => clickHandler(s, new MouseEventArgs(e.Button, 2, e.X, e.Y, e.Delta));
-            iconBox.MouseDoubleClick += (s, e) => clickHandler(s, new MouseEventArgs(e.Button, 2, e.X, e.Y, e.Delta));
-
-            // Hover effect
-            Action<Control> addHover = null!;
-            addHover = (ctrl) =>
-            {
-                ctrl.MouseEnter += (s, e) =>
-                {
-                    if (!selectedIndices.Contains((int)row.Tag))
-                    {
-                        row.BackColor = currentTheme == "dark"
-                            ? Color.FromArgb(55, 55, 65)
-                            : Color.FromArgb(235, 240, 255);
-                    }
-                };
-                ctrl.MouseLeave += (s, e) =>
-                {
-                    if (!selectedIndices.Contains((int)row.Tag))
-                        row.BackColor = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
-                };
-            };
-            addHover(row);
-            addHover(iconBox);
-            addHover(nameLabel);
-            addHover(pathLabel);
-
-            // Drag & Drop
-            row.AllowDrop = true;
+            var rowWrapper = new Panel { Height = 95, Dock = DockStyle.Top, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 5), Tag = program };
+            var card = new Panel { Height = 85, Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Cursor = Cursors.Hand, Tag = program };
+            rowWrapper.Controls.Add(card); card.SizeChanged += (s, e) => SetRoundedRegion(card, 20);
             
-            MouseEventHandler mouseDown = (s, e) =>
-            {
-                if (e.Button == MouseButtons.Left)
-                {
-                    draggedItem = program;
-                    dragStartPoint = e.Location;
-                }
-            };
-
-            MouseEventHandler mouseMove = (s, e) =>
-            {
-                if (e.Button == MouseButtons.Left && draggedItem != null)
-                {
-                    if (Math.Abs(e.X - dragStartPoint.X) > 5 || Math.Abs(e.Y - dragStartPoint.Y) > 5)
-                    {
-                        row.DoDragDrop(draggedItem, DragDropEffects.Move);
-                    }
-                }
-            };
-
-            DragEventHandler dragEnter = (s, e) =>
-            {
-                if (e.Data != null && e.Data.GetDataPresent(typeof(ProgramItem)))
-                {
-                    e.Effect = DragDropEffects.Move;
-                }
-            };
-
-            DragEventHandler dragDrop = (s, e) =>
-            {
-                if (e.Data == null) return;
-                var source = e.Data.GetData(typeof(ProgramItem)) as ProgramItem;
-                if (source != null && source != program)
-                {
-                    MoveProgram(source, program);
-                    draggedItem = null;
-                }
-            };
-
-            // Attach drag events
-            Control[] dragControls = { row, iconBox, nameLabel, pathLabel };
-            foreach (var c in dragControls)
-            {
-                c.MouseDown += mouseDown;
-                c.MouseMove += mouseMove;
-            }
+            var iconBox = new PictureBox { Size = new Size(48, 48), Location = new Point(15, 18), SizeMode = PictureBoxSizeMode.StretchImage };
+            try { if (program.Icon != null) iconBox.Image = program.Icon.ToBitmap(); } catch {}
+            var nameLabel = new Label { Text = program.Name, Font = new Font("Segoe UI Semibold", 12), ForeColor = currentIsDark ? Color.White : Color.Black, Location = new Point(80, 18), AutoSize = true, BackColor = Color.Transparent };
+            var pathLabel = new Label { Text = Path.GetFileName(program.FilePath), Font = new Font("Segoe UI", 9), ForeColor = currentIsDark ? Color.FromArgb(200, 200, 200) : Color.FromArgb(100, 100, 100), Location = new Point(80, 45), AutoSize = true, BackColor = Color.Transparent };
             
-            row.DragEnter += dragEnter;
-            row.DragDrop += dragDrop;
-
-            // Right-click context menu
-            var contextMenu = new ContextMenuStrip();
-
-            // "Move to category" menu item with submenu
-            var moveToItem = new ToolStripMenuItem(T("moveToCategory"));
+            var statusDot = new Panel { Size = new Size(10, 10), BackColor = Color.Transparent };
+            statusDot.Location = new Point(card.Width - 30, (card.Height - 10) / 2);
+            statusDot.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            statusDot.SizeChanged += (s, e) => SetRoundedRegion(statusDot, 10);
             
-            // Add all available categories
-            foreach (var category in categories)
-            {
-                string displayName = category.Name == DefaultCategory ? T("allPrograms") : category.Name;
-                var categoryItem = new ToolStripMenuItem(displayName)
-                {
-                    Checked = string.Equals(category.Name, program.Category, StringComparison.OrdinalIgnoreCase)
-                };
-                
-                categoryItem.Click += (s, e) => 
-                {
-                    if (!string.Equals(program.Category, category.Name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        program.Category = category.Name;
-                        SavePrograms();
-                        RefreshProgramList();
-                    }
-                };
-                moveToItem.DropDownItems.Add(categoryItem);
-            }
-
-            contextMenu.Items.Add(moveToItem);
-            
-            // "Rename" menu item
-            var renameItem = new ToolStripMenuItem(T("contextRename"));
-            renameItem.Click += (s, e) => ShowRenameDialog(program);
-            contextMenu.Items.Add(renameItem);
-
-            // "Delete" menu item
-            var deleteItem = new ToolStripMenuItem(T("contextDelete"));
-            deleteItem.Click += (s, e) => 
-            {
-                programs.Remove(program);
-                SavePrograms();
-                RefreshProgramList();
+            var deleteBtn = new Label { Text = "\uE74D", Font = new Font("Segoe MDL2 Assets", 12), ForeColor = currentIsDark ? Color.Gray : Color.DarkGray, BackColor = Color.Transparent, AutoSize = true, Cursor = Cursors.Hand };
+            deleteBtn.Location = new Point(card.Width - 70, (card.Height - 15) / 2);
+            deleteBtn.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            deleteBtn.MouseEnter += (s, e) => deleteBtn.ForeColor = Color.FromArgb(220, 53, 69);
+            deleteBtn.MouseLeave += (s, e) => deleteBtn.ForeColor = currentIsDark ? Color.Gray : Color.DarkGray;
+            deleteBtn.Click += (s, e) => {
+                if (MessageBox.Show($"Vill du verkligen ta bort {program.Name}?", "Bekr\u00e4fta", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
+                    programs.Remove(program); SavePrograms(); RefreshProgramList();
+                }
             };
-            contextMenu.Items.Add(deleteItem);
+            
+            card.Controls.AddRange(new Control[] { iconBox, nameLabel, pathLabel, statusDot, deleteBtn });
 
-            // Attach context menu to all controls in the row
-            row.ContextMenuStrip = contextMenu;
-            iconBox.ContextMenuStrip = contextMenu;
-            nameLabel.ContextMenuStrip = contextMenu;
-            pathLabel.ContextMenuStrip = contextMenu;
+            // Context Menu for ProgramsHelper for Renaming
+            Action showRename = () => {
+                using (var form = new Form { Text = "Redigera program", Size = new Size(300, 180), StartPosition = FormStartPosition.CenterParent, BackColor = Color.FromArgb(32, 32, 35), ForeColor = Color.White, FormBorderStyle = FormBorderStyle.FixedDialog }) {
+                    var lbl = new Label { Text = "Program-namn:", Dock = DockStyle.Top, Height = 40, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(10, 0, 0, 5) };
+                    var txt = new TextBox { Dock = DockStyle.Top, Text = program.Name, BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 12) };
+                    var btn = new Button { Text = "Spara", Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White };
+                    btn.Click += (se, ev) => { program.Name = txt.Text; form.DialogResult = DialogResult.OK; };
+                    form.Controls.Add(txt); form.Controls.Add(lbl); form.Controls.Add(btn);
+                    if (form.ShowDialog() == DialogResult.OK) { SavePrograms(); RefreshProgramList(); }
+                }
+            };
+            // Context Menu for Programs
+            var cms = new ContextMenuStrip { BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White };
+            var editItem = new ToolStripMenuItem("Byt namn på program");
+            editItem.Click += (s, e) => {
+                showRename();
+            };
+            var deleteItem = new ToolStripMenuItem("Ta bort program");
+            deleteItem.Click += (s, e) => {
+                if (MessageBox.Show($"Vill du ta bort {program.Name}?", "Bekr\u00e4fta", MessageBoxButtons.YesNo) == DialogResult.Yes) {
+                    programs.Remove(program); SavePrograms(); RefreshProgramList();
+                }
+            };
+            cms.Items.Add(editItem);
+            cms.Items.Add(new ToolStripSeparator());
+            cms.Items.Add(deleteItem);
+            card.ContextMenuStrip = cms;
+            iconBox.ContextMenuStrip = cms; nameLabel.ContextMenuStrip = cms; pathLabel.ContextMenuStrip = cms;
 
-            return row;
+            // Enhanced Interaction Logic
+            Point mouseDownPos = Point.Empty;
+            bool dragThresholdMet = false;
+
+            MouseEventHandler onDown = (s, e) => {
+                if (e.Button == MouseButtons.Left) {
+                    isDragging = false; 
+                    dragThresholdMet = false;
+                    draggedProgram = program; 
+                    draggedControl = rowWrapper; 
+                    mouseDownPos = Cursor.Position;
+                    dragOffset = card.PointToClient(Cursor.Position);
+                }
+            };
+
+            MouseEventHandler onMove = (s, e) => {
+                if (draggedControl != null && Control.MouseButtons == MouseButtons.Left) {
+                    var curPos = Cursor.Position;
+                    if (!dragThresholdMet && (Math.Abs(curPos.X - mouseDownPos.X) > 5 || Math.Abs(curPos.Y - mouseDownPos.Y) > 5)) {
+                        dragThresholdMet = true;
+                        isDragging = true;
+                        card.BackColor = Color.FromArgb(60, 60, 70);
+                    }
+
+                    if (isDragging) {
+                        var clientPos = programPanel.PointToClient(Cursor.Position);
+                        CheckDragPositionOptimized(clientPos.Y);
+                    }
+                }
+            };
+
+            MouseEventHandler onUp = (s, e) => {
+                if (isDragging) {
+                    isDragging = false; card.BackColor = Color.FromArgb(45, 45, 52);
+                    var currentOrder = programPanel.Controls.OfType<Panel>().Select(p => (ProgramItem)p.Tag).Reverse().ToList();
+                    programs = currentOrder;
+                    SavePrograms(); RefreshProgramList();
+                }
+            };
+
+            card.MouseDown += onDown; card.MouseMove += onMove; card.MouseUp += onUp;
+            iconBox.MouseDown += onDown; iconBox.MouseMove += onMove; iconBox.MouseUp += onUp;
+            nameLabel.MouseDown += onDown; nameLabel.MouseMove += onMove; nameLabel.MouseUp += onUp;
+            pathLabel.MouseDown += onDown; pathLabel.MouseMove += onMove; pathLabel.MouseUp += onUp;
+
+            nameLabel.Click += (s, e) => { if (!dragThresholdMet) showRename(); };
+            card.DoubleClick += (s, e) => program.Start();
+            iconBox.DoubleClick += (s, e) => program.Start();
+            nameLabel.DoubleClick += (s, e) => program.Start();
+            pathLabel.DoubleClick += (s, e) => program.Start();
+            return rowWrapper;
         }
 
-        private void DeselectAllRows()
+        private void CheckDragPositionOptimized(int mouseY)
         {
-            if (programPanel == null) return;
-            Color panelBg = currentTheme == "dark" ? Color.FromArgb(45, 45, 45) : Color.White;
-            Color textColor = currentTheme == "dark" ? Color.White : Color.FromArgb(30, 30, 30);
-            Color secondaryTextColor = currentTheme == "dark" ? Color.FromArgb(180, 180, 180) : Color.Gray;
-
-            foreach (Control ctrl in programPanel.Controls)
-            {
-                if (ctrl is Panel p && p.Tag is int)
-                {
-                    p.BackColor = panelBg;
-                    foreach (Control child in p.Controls)
-                    {
-                        if (child is Label lbl)
-                        {
-                            lbl.BackColor = panelBg;
-                            if (lbl.Font.Bold)
-                                lbl.ForeColor = textColor;
-                            else
-                                lbl.ForeColor = secondaryTextColor;
-                        }
+            if (draggedControl == null) return;
+            
+            foreach (Control ctrl in programPanel.Controls) {
+                if (ctrl == draggedControl) continue;
+                if (mouseY > ctrl.Top && mouseY < ctrl.Bottom) {
+                    var targetIdx = programPanel.Controls.GetChildIndex(ctrl);
+                    var currentIdx = programPanel.Controls.GetChildIndex(draggedControl);
+                    if (targetIdx != currentIdx) {
+                        programPanel.Controls.SetChildIndex(draggedControl, targetIdx);
                     }
+                    return;
                 }
             }
         }
 
-        private void UpdateStatus()
+        private void UpdateStatus() { if (statusLabel != null) statusLabel.Text = $"{programs.Count}/{MaxPrograms} {T("programs")}"; }
+
+        private void LoadPrograms()
         {
-            if (statusLabel != null)
-                statusLabel.Text = string.Format(T("programCount"), programs.Count, MaxPrograms);
-        }
-
-        private void ShowRenameDialog(ProgramItem program)
-        {
-            using (var inputDialog = new Form())
-            {
-                inputDialog.Text = T("editNameTitle");
-                inputDialog.Size = new Size(350, 150);
-                inputDialog.StartPosition = FormStartPosition.CenterParent;
-                inputDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                inputDialog.MaximizeBox = false;
-                inputDialog.MinimizeBox = false;
-
-                var label = new Label { Text = T("newName"), Left = 20, Top = 20, Width = 100 };
-                var textBox = new TextBox { Text = program.Name, Left = 120, Top = 20, Width = 200 };
-                var okButton = new Button { Text = T("ok"), Left = 120, Top = 60, Width = 80, DialogResult = DialogResult.OK };
-                var cancelButton = new Button { Text = T("cancel"), Left = 210, Top = 60, Width = 80, DialogResult = DialogResult.Cancel };
-
-                inputDialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
-                inputDialog.AcceptButton = okButton;
-                inputDialog.CancelButton = cancelButton;
-
-                if (inputDialog.ShowDialog() == DialogResult.OK)
-                {
-                    string newName = textBox.Text.Trim();
-                    if (!string.IsNullOrEmpty(newName))
-                    {
-                        program.Name = newName;
-                        RefreshProgramList();
-                        SavePrograms();
-                    }
-                }
+            if (File.Exists(ConfigFile)) {
+                var json = File.ReadAllText(ConfigFile);
+                try {
+                var items = JsonSerializer.Deserialize<List<ProgramData>>(json);
+                if (items != null) programs = items.Select(d => new ProgramItem(d.Name, d.FilePath) { Category = d.Category }).ToList();
+                } catch {}
             }
         }
 
-        // ========== Button Event Handlers ==========
-
-        private void AddButton_Click(object? sender, EventArgs e)
+        private void SavePrograms()
         {
-            if (programs.Count >= MaxPrograms)
-            {
-                MessageBox.Show(string.Format(T("limitReached"), MaxPrograms), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            using (var openFileDialog = new OpenFileDialog())
-            {
-                openFileDialog.Title = T("selectFile");
-                openFileDialog.Filter = T("fileFilter");
-                openFileDialog.Multiselect = true;
-
-                if (openFileDialog.ShowDialog() == DialogResult.OK)
-                {
-                    foreach (string fileName in openFileDialog.FileNames)
-                    {
-                        if (programs.Count >= MaxPrograms) break;
-
-                        if (!programs.Any(p => p.FilePath.Equals(fileName, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            var program = new ProgramItem(Path.GetFileNameWithoutExtension(fileName), fileName);
-                            program.Category = currentCategory;
-                            programs.Insert(0, program);
-                        }
-                    }
-
-                    RefreshProgramList();
-                    SavePrograms();
-                }
-            }
+            var data = programs.Select(p => new ProgramData { Name = p.Name, FilePath = p.FilePath, Category = p.Category }).ToList();
+            File.WriteAllText(ConfigFile, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
         }
-
-        private void EditButton_Click(object? sender, EventArgs e)
-        {
-            if (selectedIndices.Count == 0)
-            {
-                MessageBox.Show(T("selectProgramEdit"), T("noSelection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            int idx = selectedIndices.First();
-            var filtered = currentCategory == DefaultCategory
-                ? programs.ToList()
-                : programs.Where(p => p.Category == currentCategory).ToList();
-            if (idx >= filtered.Count) return;
-
-            var program = filtered[idx];
-
-            using (var inputDialog = new Form())
-            {
-                inputDialog.Text = T("editNameTitle");
-                inputDialog.Size = new Size(350, 150);
-                inputDialog.StartPosition = FormStartPosition.CenterParent;
-                inputDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                inputDialog.MaximizeBox = false;
-                inputDialog.MinimizeBox = false;
-
-                var label = new Label { Text = T("newName"), Left = 20, Top = 20, Width = 100 };
-                var textBox = new TextBox { Text = program.Name, Left = 120, Top = 20, Width = 200 };
-                var okButton = new Button { Text = T("ok"), Left = 120, Top = 60, Width = 80, DialogResult = DialogResult.OK };
-                var cancelButton = new Button { Text = T("cancel"), Left = 210, Top = 60, Width = 80, DialogResult = DialogResult.Cancel };
-
-                inputDialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
-                inputDialog.AcceptButton = okButton;
-                inputDialog.CancelButton = cancelButton;
-
-                if (inputDialog.ShowDialog() == DialogResult.OK)
-                {
-                    string newName = textBox.Text.Trim();
-                    if (!string.IsNullOrEmpty(newName))
-                    {
-                        program.Name = newName;
-                        RefreshProgramList();
-                        SavePrograms();
-                    }
-                }
-            }
-        }
-
-        private void CategoryButton_Click(object? sender, EventArgs e)
-        {
-            using (var inputDialog = new Form())
-            {
-                inputDialog.Text = T("addCategoryTitle");
-                inputDialog.Size = new Size(350, 150);
-                inputDialog.StartPosition = FormStartPosition.CenterParent;
-                inputDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                inputDialog.MaximizeBox = false;
-                inputDialog.MinimizeBox = false;
-
-                var label = new Label { Text = T("categoryName"), Left = 20, Top = 20, Width = 100 };
-                var textBox = new TextBox { Left = 120, Top = 20, Width = 200 };
-                var okButton = new Button { Text = T("ok"), Left = 120, Top = 60, Width = 80, DialogResult = DialogResult.OK };
-                var cancelButton = new Button { Text = T("cancel"), Left = 210, Top = 60, Width = 80, DialogResult = DialogResult.Cancel };
-
-                inputDialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
-                inputDialog.AcceptButton = okButton;
-                inputDialog.CancelButton = cancelButton;
-
-                if (inputDialog.ShowDialog() == DialogResult.OK)
-                {
-                    string categoryName = textBox.Text.Trim();
-                    if (!string.IsNullOrEmpty(categoryName) && !IsDefaultCategoryAlias(categoryName) && !categories.Any(c => c.Name.Equals(categoryName, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        categories.Add(new Category(categoryName));
-                        SaveCategories();
-                        LoadCategories();
-                        RefreshProgramList(); // Refresh to update context menus
-                        MessageBox.Show(string.Format(T("categoryAdded"), categoryName), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    else if (!string.IsNullOrEmpty(categoryName))
-                    {
-                        MessageBox.Show(T("categoryExists"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                }
-            }
-        }
-
-        private void RemoveButton_Click(object? sender, EventArgs e)
-        {
-            if (selectedIndices.Count == 0)
-            {
-                MessageBox.Show(T("selectProgramRemove"), T("noSelection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var filtered = currentCategory == DefaultCategory
-                ? programs.ToList()
-                : programs.Where(p => p.Category == currentCategory).ToList();
-
-            var toRemove = selectedIndices.OrderByDescending(i => i).Where(i => i < filtered.Count).Select(i => filtered[i]).ToList();
-            foreach (var p in toRemove)
-                programs.Remove(p);
-
-            RefreshProgramList();
-            SavePrograms();
-        }
-
-        private void RemoveCategoryButton_Click(object? sender, EventArgs e)
-        {
-            if (categoryComboBox == null || categoryComboBox.SelectedItem == null)
-            {
-                MessageBox.Show(T("selectCategoryRemove"), T("noSelection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string selectedCategory = categoryComboBox.SelectedItem.ToString() ?? string.Empty;
-            string displayDefault = T("allPrograms");
-
-            if (selectedCategory == displayDefault || selectedCategory == DefaultCategory)
-            {
-                MessageBox.Show(T("cannotRemoveDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var programsInCategory = programs.Where(p => p.Category == selectedCategory).ToList();
-            if (programsInCategory.Any())
-            {
-                var result = MessageBox.Show(
-                    string.Format(T("programsInCategory"), programsInCategory.Count, selectedCategory),
-                    T("title"),
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Yes)
-                {
-                    foreach (var program in programsInCategory)
-                        program.Category = DefaultCategory;
-                    SavePrograms();
-                }
-                else return;
-            }
-
-            var categoryToRemove = categories.FirstOrDefault(c => c.Name == selectedCategory);
-            if (categoryToRemove != null)
-            {
-                categories.Remove(categoryToRemove);
-                SaveCategories();
-                LoadCategories();
-                RefreshProgramList(); // Refresh to update context menus
-                MessageBox.Show(string.Format(T("categoryRemoved"), selectedCategory), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-        }
-
-        private void EditCategoryButton_Click(object? sender, EventArgs e)
-        {
-            if (categoryComboBox == null || categoryComboBox.SelectedItem == null)
-            {
-                MessageBox.Show(T("selectCategoryEdit"), T("noSelection"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string selectedCategory = categoryComboBox.SelectedItem.ToString() ?? string.Empty;
-            string displayDefault = T("allPrograms");
-
-            if (selectedCategory == displayDefault || selectedCategory == DefaultCategory)
-            {
-                MessageBox.Show(T("cannotEditDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            using (var inputDialog = new Form())
-            {
-                inputDialog.Text = T("editCategoryTitle");
-                inputDialog.Size = new Size(350, 150);
-                inputDialog.StartPosition = FormStartPosition.CenterParent;
-                inputDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
-                inputDialog.MaximizeBox = false;
-                inputDialog.MinimizeBox = false;
-
-                var label = new Label { Text = T("categoryName"), Left = 20, Top = 20, Width = 100 };
-                var textBox = new TextBox { Left = 120, Top = 20, Width = 200, Text = selectedCategory };
-                var okButton = new Button { Text = T("ok"), Left = 120, Top = 60, Width = 80, DialogResult = DialogResult.OK };
-                var cancelButton = new Button { Text = T("cancel"), Left = 210, Top = 60, Width = 80, DialogResult = DialogResult.Cancel };
-
-                inputDialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
-                inputDialog.AcceptButton = okButton;
-                inputDialog.CancelButton = cancelButton;
-
-                if (inputDialog.ShowDialog() == DialogResult.OK)
-                {
-                    string newCategoryName = textBox.Text.Trim();
-                    if (string.IsNullOrEmpty(newCategoryName))
-                        return;
-
-                    if (newCategoryName.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase))
-                        return;
-
-                    if (IsDefaultCategoryAlias(newCategoryName))
-                    {
-                        MessageBox.Show(T("cannotEditDefault"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    if (categories.Any(c => c.Name.Equals(newCategoryName, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        MessageBox.Show(T("categoryExists"), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    // Update category name
-                    var categoryToEdit = categories.FirstOrDefault(c => c.Name == selectedCategory);
-                    if (categoryToEdit != null)
-                    {
-                        categoryToEdit.Name = newCategoryName;
-                        
-                        // Update programs
-                        foreach (var prog in programs.Where(p => p.Category == selectedCategory))
-                        {
-                            prog.Category = newCategoryName;
-                        }
-
-                        SaveCategories();
-                        SavePrograms();
-                        
-                        // Reload and select the new name
-                        LoadCategories();
-                        RefreshProgramList(); // Refresh to update context menus
-                        
-                        if (categoryComboBox != null)
-                        {
-                            int index = -1;
-                            for(int i=0; i < categoryComboBox.Items.Count; i++)
-                            {
-                                if (categoryComboBox.Items[i]?.ToString() == newCategoryName)
-                                {
-                                    index = i;
-                                    break;
-                                }
-                            }
-                            if (index >= 0)
-                                categoryComboBox.SelectedIndex = index;
-                        }
-
-                        MessageBox.Show(string.Format(T("categoryRenamed"), selectedCategory, newCategoryName), T("title"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                }
-            }
-        }
-
-        private void CategoryComboBox_SelectedIndexChanged(object? sender, EventArgs e)
-        {
-            if (categoryComboBox != null && categoryComboBox.SelectedIndex >= 0)
-            {
-                string selected = categoryComboBox.SelectedItem?.ToString() ?? DefaultCategory;
-                if (selected == T("allPrograms"))
-                    currentCategory = DefaultCategory;
-                else
-                    currentCategory = selected;
-                    
-                RefreshProgramList();
-            }
-        }
-
-        // ========== Data persistence ==========
 
         private void LoadCategories()
         {
-            try
-            {
-                var loadedCategories = new List<Category>();
-                if (File.Exists(CategoryFile))
-                {
-                    var json = File.ReadAllText(CategoryFile);
-                    var saved = JsonSerializer.Deserialize<List<Category>>(json);
-                    if (saved != null)
-                    {
-                        loadedCategories.AddRange(saved);
-                    }
-                }
-
-                // Filter out any existing "All programs" variants from loaded categories
-                // Also filter "Alla program" to avoid confusion/duplication
-                categories = loadedCategories.Where(c => !IsDefaultCategoryAlias(c.Name)).ToList();
-
-                // Always insert DefaultCategory at the top
-                categories.Insert(0, new Category(DefaultCategory));
-
-                if (categoryComboBox != null)
-                {
-                    categoryComboBox.SelectedIndexChanged -= CategoryComboBox_SelectedIndexChanged;
-                    categoryComboBox.Items.Clear();
-                    
-                    // Use a HashSet to track added names to prevent UI duplicates
-                    var addedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                    foreach (var category in categories)
-                    {
-                        string displayName = category.Name == DefaultCategory ? T("allPrograms") : category.Name;
-                        
-                        // Only add if not already present (case-insensitive check for display name)
-                        if (!addedNames.Contains(displayName))
-                        {
-                            categoryComboBox.Items.Add(displayName);
-                            addedNames.Add(displayName);
-                        }
-                    }
-
-                    if (categoryComboBox.Items.Count > 0)
-                        categoryComboBox.SelectedIndex = 0;
-                        
-                    currentCategory = DefaultCategory;
-                    categoryComboBox.SelectedIndexChanged += CategoryComboBox_SelectedIndexChanged;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(string.Format(T("couldNotLoad"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                categories.Clear();
-                categories.Add(new Category(DefaultCategory));
-
-                if (categoryComboBox != null)
-                {
-                    categoryComboBox.Items.Clear();
-                    categoryComboBox.Items.Add(T("allPrograms"));
-                    categoryComboBox.SelectedItem = T("allPrograms");
-                    currentCategory = DefaultCategory;
-                }
+            categories = new List<Category> { new Category(DefaultCategory) };
+            if (File.Exists(CategoryFile)) {
+                var json = File.ReadAllText(CategoryFile);
+                try {
+                var saved = JsonSerializer.Deserialize<List<Category>>(json);
+                if (saved != null) categories.AddRange(saved.Where(c => c.Name != DefaultCategory));
+                } catch {}
             }
         }
 
         private void SaveCategories()
         {
-            try
-            {
-                var json = JsonSerializer.Serialize(categories, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(CategoryFile, json);
+            var toSave = categories.Where(c => c.Name != DefaultCategory).ToList();
+            File.WriteAllText(CategoryFile, JsonSerializer.Serialize(toSave, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        private void LoadSettings() { if (File.Exists(SettingsFile)) { var json = File.ReadAllText(SettingsFile); try { var s = JsonSerializer.Deserialize<AppSettings>(json); if (s != null) { currentLanguage = s.Language ?? "sv"; currentTheme = s.Theme ?? "dark"; } } catch {} } }
+        private void SaveSettings() { var s = new AppSettings { Language = currentLanguage, Theme = currentTheme }; File.WriteAllText(SettingsFile, JsonSerializer.Serialize(s)); }
+
+        private string T(string key)
+        {
+            if (currentLanguage == "sv") {
+                switch (key) {
+                    case "addProgram": return "L\u00e4gg till";
+                    case "remove": return "Ta bort";
+                    case "editName": return "Redigera";
+                    case "addCategory": return "Ny kategori";
+                    case "search": return "S\u00f6k...";
+                    case "allPrograms": return "Alla program";
+                    case "showPrograms": return "Visa program";
+                    case "exit": return "Avsluta";
+                    case "programs": return "program";
+                    default: return key;
+                }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(string.Format(T("couldNotSave"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return key;
+        }
+
+        private Icon GenerateAppIcon() {
+            using (Bitmap bmp = new Bitmap(256, 256)) {
+                using (Graphics g = Graphics.FromImage(bmp)) {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                    g.Clear(Color.Transparent);
+
+                    // Premium Background Gradient
+                    var rect = new Rectangle(10, 10, 236, 236);
+                    using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+                        path.AddEllipse(rect);
+                        using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(rect, Color.FromArgb(0, 120, 215), Color.FromArgb(0, 40, 100), 45f)) {
+                            g.FillPath(brush, path);
+                        }
+                    }
+
+                    // Stylized "S" / Checkmark Symbol
+                    using (Pen pen = new Pen(Color.White, 18)) {
+                        pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                        g.DrawLine(pen, 70, 130, 110, 170);
+                        g.DrawLine(pen, 110, 170, 180, 80);
+                    }
+                }
+                IntPtr hIcon = bmp.GetHicon();
+                return Icon.FromHandle(hIcon);
             }
         }
 
-        private void LoadPrograms()
+        private void AddButton_Click(object? sender, EventArgs e) { 
+            using (var ofd = new OpenFileDialog { Multiselect = true }) {
+                if (ofd.ShowDialog() == DialogResult.OK) {
+                    foreach (var file in ofd.FileNames) programs.Insert(0, new ProgramItem(Path.GetFileNameWithoutExtension(file), file) { Category = currentCategory });
+                    SavePrograms(); RefreshProgramList();
+                }
+            }
+        }
+        private void RemoveButton_Click(object? sender, EventArgs e) {
+            if (currentCategory == DefaultCategory) return;
+            if (programs.Any(p => p.Category == currentCategory)) {
+                MessageBox.Show("Rensa kategorin f\u00f6rst!") ; return;
+            }
+            if (MessageBox.Show($"Vill du verkligen radera kategorin '{currentCategory}'?", "Bekr\u00e4fta", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
+                categories.RemoveAll(c => c.Name == currentCategory);
+                currentCategory = DefaultCategory;
+                SaveCategories(); RefreshCategories(); RefreshProgramList();
+            }
+        }
+
+        private void EditButton_Click(object? sender, EventArgs e) {
+            if (currentCategory == DefaultCategory) return;
+            using (var form = new Form { Text = "Byt namn", Size = new Size(300, 180), StartPosition = FormStartPosition.CenterParent, BackColor = Color.FromArgb(32, 32, 35), ForeColor = Color.White, FormBorderStyle = FormBorderStyle.FixedDialog }) {
+                var lbl = new Label { Text = "Nytt namn:", Dock = DockStyle.Top, Height = 40, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(10, 0, 0, 5) };
+                var txt = new TextBox { Dock = DockStyle.Top, Text = currentCategory, BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 12) };
+                var btn = new Button { Text = "Spara", Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White };
+                btn.Click += (s, ev) => {
+                    string newName = txt.Text;
+                    foreach (var p in programs.Where(p => p.Category == currentCategory)) p.Category = newName;
+                    var cat = categories.FirstOrDefault(c => c.Name == currentCategory);
+                    if (cat != null) cat.Name = newName;
+                    currentCategory = newName;
+                    form.DialogResult = DialogResult.OK;
+                };
+                form.Controls.Add(txt); form.Controls.Add(lbl); form.Controls.Add(btn);
+                if (form.ShowDialog() == DialogResult.OK) { SavePrograms(); SaveCategories(); RefreshCategories(); RefreshProgramList(); }
+            }
+        }
+
+        private void CategoryButton_Click(object? sender, EventArgs e) {
+            using (var form = new Form { Text = "Ny kategori", Size = new Size(300, 180), StartPosition = FormStartPosition.CenterParent, BackColor = Color.FromArgb(32, 32, 35), ForeColor = Color.White, FormBorderStyle = FormBorderStyle.FixedDialog }) {
+                var lbl = new Label { Text = "Kategori-namn:", Dock = DockStyle.Top, Height = 40, TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(10, 0, 0, 5) };
+                var txt = new TextBox { Dock = DockStyle.Top, BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 12) };
+                var btn = new Button { Text = "Skapa", Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White };
+                btn.Click += (s, ev) => { if (!string.IsNullOrWhiteSpace(txt.Text)) categories.Add(new Category(txt.Text)); form.DialogResult = DialogResult.OK; };
+                form.Controls.Add(txt); form.Controls.Add(lbl); form.Controls.Add(btn);
+                if (form.ShowDialog() == DialogResult.OK) { SaveCategories(); RefreshCategories(); }
+            }
+        }
+
+        private bool IsSystemDarkTheme()
         {
-            try
-            {
-                if (File.Exists(ConfigFile))
-                {
-                    var json = File.ReadAllText(ConfigFile);
-                    var savedPrograms = JsonSerializer.Deserialize<List<ProgramData>>(json);
-                    if (savedPrograms != null)
-                    {
-                        programs.Clear();
-                        foreach (var data in savedPrograms)
-                        {
-                            var program = new ProgramItem(data.Name, data.FilePath, data.Arguments);
-                            program.AddedDate = data.AddedDate;
-                            program.Category = data.Category ?? DefaultCategory;
-                            if (IsDefaultCategoryAlias(program.Category))
-                                program.Category = DefaultCategory;
-                            programs.Add(program);
+            try {
+                using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")) {
+                    if (key?.GetValue("AppsUseLightTheme") is int val) {
+                        return val == 0;
+                    }
+                }
+            } catch {}
+            return true;
+        }
+
+        private void ApplyTheme()
+        {
+            currentIsDark = IsSystemDarkTheme();
+            Color bgMain = currentIsDark ? Color.FromArgb(32, 32, 35) : Color.FromArgb(243, 243, 243);
+            Color bgCard = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White;
+            Color textMain = currentIsDark ? Color.White : Color.Black;
+            Color textDim = currentIsDark ? Color.FromArgb(200, 200, 200) : Color.FromArgb(100, 100, 100);
+
+            this.BackColor = bgMain;
+            if (mainContainer != null) mainContainer.BackColor = bgMain;
+            if (titleLabel != null) titleLabel.ForeColor = textMain;
+            
+            if (searchBox != null) {
+                searchBox.BackColor = bgCard;
+                searchBox.ForeColor = textMain;
+                if (searchBox.Parent is Panel pnl) pnl.BackColor = bgCard;
+            }
+            if (categoryPanel?.Controls.Count > 0 && categoryPanel.Controls[0] is Panel catCard) {
+                catCard.BackColor = bgCard;
+                foreach (Control c in catCard.Controls) {
+                    if (c is Label l && l.Text != "\uE70D") l.ForeColor = textMain;
+                }
+            }
+            if (programPanel != null) {
+                foreach (Control row in programPanel.Controls) {
+                    if (row.Controls.Count > 0 && row.Controls[0] is Panel card) {
+                        card.BackColor = bgCard;
+                        foreach (Control c in card.Controls) {
+                            if (c is Label l) {
+                                if (l.Text == "\uE74D") l.ForeColor = currentIsDark ? Color.Gray : Color.DarkGray;
+                                else l.ForeColor = l.Font.Size >= 12 ? textMain : textDim;
+                            }
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(string.Format(T("couldNotLoad"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-
-            RefreshProgramList();
+            if (statusLabel != null) statusLabel.ForeColor = textDim;
+            if (copyrightLabel != null) copyrightLabel.ForeColor = textDim;
         }
 
-        private void SavePrograms()
+        private void MainForm_DragEnter(object? sender, DragEventArgs e)
         {
-            try
-            {
-                var programData = programs.Select(p => new ProgramData
-                {
-                    Name = p.Name,
-                    FilePath = p.FilePath,
-                    Arguments = p.Arguments,
-                    AddedDate = p.AddedDate,
-                    Category = p.Category
-                }).ToList();
-
-                var json = JsonSerializer.Serialize(programData, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(ConfigFile, json);
+            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) {
+                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+                if (files.Any(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))) {
+                    e.Effect = DragDropEffects.Copy;
+                    return;
+                }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show(string.Format(T("couldNotSave"), ex.Message), T("error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            e.Effect = DragDropEffects.None;
         }
 
-        // ========== Window behavior ==========
-
-        protected override void OnResize(EventArgs e)
+        private void MainForm_DragDrop(object? sender, DragEventArgs e)
         {
-            if (this.WindowState == FormWindowState.Minimized)
-            {
-                this.ShowInTaskbar = false;
-                this.Hide();
+            if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            string[] files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+            bool added = false;
+            foreach (string file in files) {
+                if (file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) {
+                    if (programs.Count >= MaxPrograms) { MessageBox.Show($"Maxgräns på {MaxPrograms} program nådd."); break; }
+                    if (!programs.Any(p => p.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase))) {
+                        string name = Path.GetFileNameWithoutExtension(file);
+                        programs.Add(new ProgramItem(name, file) { Category = currentCategory });
+                        added = true;
+                    }
+                }
             }
-            base.OnResize(e);
+            if (added) { SavePrograms(); RefreshProgramList(); }
         }
 
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        private void StatusTimer_Tick(object? sender, EventArgs e)
         {
-            if (e.CloseReason == CloseReason.UserClosing)
-            {
-                e.Cancel = true;
-                this.WindowState = FormWindowState.Minimized;
-                this.Hide();
-            }
-            else
-            {
-                DisposeClickTimer();
-                leftClickMenu?.Dispose();
-                contextMenu?.Dispose();
-                notifyIcon?.Dispose();
-            }
-            base.OnFormClosing(e);
+            if (programs.Count == 0 || programPanel == null || programPanel.Controls.Count == 0) return;
+            try {
+                var processes = Process.GetProcesses();
+                var running = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var p in processes) {
+                    try { running.Add(p.ProcessName); } catch {}
+                }
+                foreach (Control rowWrapper in programPanel.Controls) {
+                    if (rowWrapper.Controls.Count > 0 && rowWrapper.Controls[0] is Panel card) {
+                        if (card.Tag is ProgramItem prog) {
+                            string exeName = Path.GetFileNameWithoutExtension(prog.FilePath);
+                            bool isRunning = running.Contains(exeName);
+                            var dot = card.Controls.OfType<Panel>().FirstOrDefault(c => c.Width == 10 && c.Height == 10);
+                            if (dot != null) dot.BackColor = isRunning ? Color.LimeGreen : Color.Transparent;
+                        }
+                    }
+                }
+            } catch {}
         }
-    }
-
-    public class ProgramData
-    {
-        public string Name { get; set; } = string.Empty;
-        public string FilePath { get; set; } = string.Empty;
-        public string? Arguments { get; set; }
-        public DateTime AddedDate { get; set; }
-        public string? Category { get; set; }
-    }
-
-    public class AppSettings
-    {
-        public string? Language { get; set; }
-        public string? Theme { get; set; }
-        public bool? Autostart { get; set; }
     }
 }
-
-
-
-
-
-
