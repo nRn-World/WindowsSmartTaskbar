@@ -114,7 +114,7 @@ This project is licensed under a strict **Non-Commercial License**. Commercial u
 
 ---
 
-👨‍💻 **Author** **nRn World (Robin Ayzit)** 📧 [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)
+👨‍💻 **Author** **nRn World** 📧 [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)
 
 ## 🙏 Support
 
