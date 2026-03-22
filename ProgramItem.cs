@@ -30,19 +30,22 @@ namespace WindowsSmartTaskbar
         {
             try
             {
-                // Försök hämta ikon direkt från filen (fungerar för både .exe och .lnk)
-                if (File.Exists(FilePath))
-                {
-                    Icon = Icon.ExtractAssociatedIcon(FilePath);
-                    return;
-                }
-
-                // Om originalfilen inte finns, försök med målfilen för genvägar
+                string path = FilePath;
                 if (Path.GetExtension(FilePath).ToLower() == ".lnk")
                 {
-                    string targetPath = GetShortcutTarget(FilePath);
-                    if (File.Exists(targetPath))
-                        Icon = Icon.ExtractAssociatedIcon(targetPath);
+                    string target = GetShortcutTarget(FilePath);
+                    if (File.Exists(target)) path = target;
+                }
+
+                if (File.Exists(path))
+                {
+                    SHFILEINFO shfi = new SHFILEINFO();
+                    IntPtr hIcon = SHGetFileInfo(path, 0, ref shfi, (uint)Marshal.SizeOf(shfi), SHGFI_ICON | SHGFI_LARGEICON);
+                    if (hIcon != IntPtr.Zero)
+                    {
+                        Icon = (Icon)System.Drawing.Icon.FromHandle(shfi.hIcon).Clone();
+                        DestroyIcon(shfi.hIcon);
+                    }
                 }
             }
             catch (Exception ex)
@@ -50,6 +53,28 @@ namespace WindowsSmartTaskbar
                 Debug.WriteLine($"[{nameof(ProgramItem)}::{nameof(LoadIcon)}] {ex}");
             }
         }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        public struct SHFILEINFO
+        {
+            public IntPtr hIcon;
+            public int iIcon;
+            public uint dwAttributes;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szDisplayName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+            public string szTypeName;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbSizeFileInfo, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool DestroyIcon(IntPtr hIcon);
+
+        public const uint SHGFI_ICON = 0x100;
+        public const uint SHGFI_LARGEICON = 0x0;
 
         private string GetShortcutTarget(string shortcutPath)
         {
@@ -68,40 +93,19 @@ namespace WindowsSmartTaskbar
         private string? ReadShortcutTarget(string shortcutPath)
         {
             Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType == null)
-            {
-                return null;
-            }
+            if (shellType == null) return null;
 
             object? shell = null;
             object? shortcut = null;
             try
             {
                 shell = Activator.CreateInstance(shellType);
-                if (shell == null)
-                {
-                    return null;
-                }
+                if (shell == null) return null;
 
-                shortcut = shellType.InvokeMember(
-                    "CreateShortcut",
-                    BindingFlags.InvokeMethod,
-                    null,
-                    shell,
-                    new object[] { shortcutPath });
+                shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                if (shortcut == null) return null;
 
-                if (shortcut == null)
-                {
-                    return null;
-                }
-
-                string? targetPath = shortcut.GetType().InvokeMember(
-                    "TargetPath",
-                    BindingFlags.GetProperty,
-                    null,
-                    shortcut,
-                    null) as string;
-
+                string? targetPath = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null) as string;
                 return string.IsNullOrWhiteSpace(targetPath) ? null : targetPath;
             }
             catch (Exception ex)
@@ -111,15 +115,8 @@ namespace WindowsSmartTaskbar
             }
             finally
             {
-                if (shortcut != null && Marshal.IsComObject(shortcut))
-                {
-                    Marshal.FinalReleaseComObject(shortcut);
-                }
-
-                if (shell != null && Marshal.IsComObject(shell))
-                {
-                    Marshal.FinalReleaseComObject(shell);
-                }
+                if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
+                if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
             }
         }
 
@@ -130,18 +127,12 @@ namespace WindowsSmartTaskbar
                 string targetPath = FilePath;
                 string targetArgs = Arguments ?? string.Empty;
                 
-                // Om det är en genväg, försök att starta den direkt via shell
                 if (Path.GetExtension(FilePath).ToLower() == ".lnk")
                 {
-                    // Försök först att starta genvägen direkt
                     try
                     {
-                        var startInfo = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = FilePath,
-                            UseShellExecute = true
-                        };
-                        System.Diagnostics.Process.Start(startInfo);
+                        var startInfo = new ProcessStartInfo { FileName = FilePath, UseShellExecute = true };
+                        Process.Start(startInfo);
                         return;
                     }
                     catch (Exception ex)
@@ -151,16 +142,10 @@ namespace WindowsSmartTaskbar
                     }
                 }
 
-                // Försök att starta programmet
                 if (!string.IsNullOrEmpty(targetPath))
                 {
-                    var startInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = targetPath,
-                        Arguments = targetArgs,
-                        UseShellExecute = true
-                    };
-                    System.Diagnostics.Process.Start(startInfo);
+                    var startInfo = new ProcessStartInfo { FileName = targetPath, Arguments = targetArgs, UseShellExecute = true };
+                    Process.Start(startInfo);
                 }
                 else
                 {

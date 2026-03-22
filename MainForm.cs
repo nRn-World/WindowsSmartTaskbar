@@ -33,7 +33,7 @@ namespace WindowsSmartTaskbar
         private string currentCategory = "All programs";
         private const string DefaultCategory = "All programs";
         private int MaxPrograms = 100;
-        private HashSet<int> selectedIndices = new HashSet<int>();
+        private HashSet<ProgramItem> selectedPrograms = new HashSet<ProgramItem>();
         private string searchFilter = "";
 
         private string AppDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowsSmartTaskbar");
@@ -42,7 +42,13 @@ namespace WindowsSmartTaskbar
         private string SettingsFile => Path.Combine(AppDataFolder, "settings.json");
 
         private string currentLanguage = "sv";
-        private string currentTheme = "dark";
+        private string currentTheme = "auto";
+        
+        public class SettingsData {
+            public string Language { get; set; } = "auto";
+            public string Theme { get; set; } = "auto";
+        }
+        private SettingsData appSettings = new SettingsData();
 
         private Label titleLabel = default!;
         private Label catLabel = default!;
@@ -51,9 +57,21 @@ namespace WindowsSmartTaskbar
         private TextBox searchBox = default!;
         private Label statusLabel = default!;
         private Label copyrightLabel = default!;
-        private NotifyIcon notifyIcon = default!;
-        private ContextMenuStrip contextMenu = default!;
+        private NotifyIcon? notifyIcon;
+        private ContextMenuStrip? contextMenu;
+        private ContextMenuStrip? leftClickMenu;
+        private System.Windows.Forms.Timer? statusTimer;
+        
+        protected override void OnFormClosing(FormClosingEventArgs e) {
+            if (statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); }
+            if (notifyIcon != null) { notifyIcon.Visible = false; notifyIcon.Dispose(); }
+            base.OnFormClosing(e);
+        }
+        private TableLayoutPanel actionGrid = default!;
+        private Panel titleContainer = default!;
+        private Panel titleBack = default!;
         private Panel mainContainer = default!;
+        private Panel footer = default!;
 
         private Control? draggedControl;
         private ProgramItem? draggedProgram;
@@ -61,8 +79,13 @@ namespace WindowsSmartTaskbar
         private Point dragOffset;
         private bool isDragging = false;
         
-        private System.Windows.Forms.Timer statusTimer;
         private bool currentIsDark = true;
+        private Panel scrollTrack = default!;
+        private Panel scrollThumb = default!;
+        private Panel scrollContainer = default!;
+        private bool isScrollDragging = false;
+        private int scrollStartY = 0;
+        private int currentScrollPos = 0;
 
         public MainForm()
         {
@@ -102,10 +125,10 @@ namespace WindowsSmartTaskbar
             mainContainer.MouseDown += (s, e) => dragAction(s, e);
             this.Controls.Add(mainContainer);
 
-            var titleContainer = new Panel { Dock = DockStyle.Top, Height = 85, Padding = new Padding(0, 0, 0, 15) };
+            titleContainer = new Panel { Dock = DockStyle.Top, Height = 85, Padding = new Padding(0, 0, 0, 15) };
             titleContainer.MouseDown += (s, e) => dragAction(s, e);
             
-            var titleBack = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Padding = new Padding(10) };
+            titleBack = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Padding = new Padding(10) };
             titleBack.SizeChanged += (s, e) => SetRoundedRegion(titleBack, 20);
             titleBack.MouseDown += (s, e) => dragAction(s, e);
 
@@ -141,7 +164,7 @@ namespace WindowsSmartTaskbar
             categoryPanel.Controls.Add(catCard);
             categoryPanel.MouseDown += (s, e) => dragAction(s, e);
 
-            var actionGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 110, ColumnCount = 4, RowCount = 1 };
+            actionGrid = new TableLayoutPanel { Dock = DockStyle.Top, Height = 110, ColumnCount = 4, RowCount = 1 };
             // ... existing grid setup ...
             actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             actionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
@@ -168,10 +191,33 @@ namespace WindowsSmartTaskbar
             searchPill.Controls.Add(searchBox);
             searchContainer.Controls.Add(searchPill);
 
-            programPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 0) };
+            programPanel = new Panel { Dock = DockStyle.Fill, AutoScroll = false, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 0) };
             programPanel.MouseDown += (s, e) => dragAction(s, e);
+            programPanel.MouseWheel += (s, e) => DoScroll(e.Delta > 0 ? 80 : -80);
 
-            var footer = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Color.FromArgb(30,30,35) };
+            scrollContainer = new Panel { Dock = DockStyle.None, Width = 800, BackColor = Color.Transparent, Location = new Point(0,0) };
+            scrollContainer.MouseDown += (s, e) => dragAction(s, e);
+            scrollContainer.MouseWheel += (s, e) => DoScroll(e.Delta > 0 ? 80 : -80);
+            programPanel.Controls.Add(scrollContainer);
+            programPanel.SizeChanged += (s, e) => { scrollContainer.Width = programPanel.Width; UpdateScrollBar(); };
+
+            scrollTrack = new Panel { Dock = DockStyle.Right, Width = 8, BackColor = Color.Transparent, Visible = false };
+            scrollThumb = new Panel { BackColor = Color.Gray, Width = 8, MinimumSize = new Size(8, 20), Cursor = Cursors.Hand };
+            scrollThumb.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left) { isScrollDragging = true; scrollStartY = e.Y; } };
+            scrollThumb.MouseMove += (s, e) => { if (isScrollDragging) SetScrollFromThumb(scrollThumb.Top + (e.Y - scrollStartY)); };
+            scrollThumb.MouseUp += (s, e) => isScrollDragging = false;
+            scrollTrack.Controls.Add(scrollThumb);
+            this.Controls.Add(scrollTrack);
+
+            this.AllowDrop = true;
+            this.DragEnter += MainForm_DragEnter;
+            this.DragDrop += MainForm_DragDrop;
+            
+            statusTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+            statusTimer.Tick += StatusTimer_Tick;
+            statusTimer.Start();
+
+            footer = new Panel { Dock = DockStyle.Bottom, Height = 60, BackColor = Color.FromArgb(30, 30, 35) };
             footer.MouseDown += (s, e) => dragAction(s, e);
             statusLabel = new Label { Text = "0/20 Programs", Dock = DockStyle.Left, Width = 150, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(20, 0, 0, 0), Font = new Font("Segoe UI", 10) };
             copyrightLabel = new Label { Text = "Created 2026 by \u00A9 nRn World", Dock = DockStyle.Fill, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 20, 0), Font = new Font("Segoe UI", 10) };
@@ -184,6 +230,7 @@ namespace WindowsSmartTaskbar
             mainContainer.Controls.Add(actionGrid);
             mainContainer.Controls.Add(categoryPanel);
             mainContainer.Controls.Add(titleContainer);
+            mainContainer.Resize += (s, e) => { UpdateScrollBar(); DoScroll(0); };
         }
 
         private Control CreateActionItem(string icon, string labelText, Color iconBack, EventHandler handler)
@@ -201,11 +248,15 @@ namespace WindowsSmartTaskbar
             return pnl;
         }
 
+        [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
+        public static extern bool DeleteObject(IntPtr hObject);
+
         private void SetRoundedRegion(Control control, int radius)
         {
             try {
                 IntPtr ptr = CreateRoundRectRgn(0, 0, control.Width + 1, control.Height + 1, radius, radius);
                 control.Region = Region.FromHrgn(ptr);
+                DeleteObject(ptr);
             } catch {}
         }
 
@@ -213,16 +264,69 @@ namespace WindowsSmartTaskbar
         {
             notifyIcon = new NotifyIcon { Text = "WindowsSmartTaskbar", Visible = true };
             notifyIcon.Icon = GenerateAppIcon();
-            contextMenu = new ContextMenuStrip();
-            var showMenuItem = new ToolStripMenuItem(T("showPrograms"));
-            showMenuItem.Click += (s, e) => ShowProgramList();
-            contextMenu.Items.Add(showMenuItem);
+            
+            // Right Click Menu
+            contextMenu = new ContextMenuStrip { BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black, ShowImageMargin = false, ShowCheckMargin = false };
+            var settingsItem = new ToolStripMenuItem(T("settings"));
+            settingsItem.Click += (s, e) => ShowSettingsDialog();
             var exitMenuItem = new ToolStripMenuItem(T("exit"));
             exitMenuItem.Click += (s, e) => Application.Exit();
+            contextMenu.Items.Add(settingsItem);
             contextMenu.Items.Add(exitMenuItem);
             notifyIcon.ContextMenuStrip = contextMenu;
             
-            notifyIcon.MouseDoubleClick += (s, e) => { if (e.Button == MouseButtons.Left) ShowProgramList(); };
+            // Left click handling
+            notifyIcon.MouseClick += (s, e) => {
+                if (e.Button == MouseButtons.Left) {
+                    BuildAndShowLeftClickMenu();
+                }
+            };
+        }
+
+        private void BuildAndShowLeftClickMenu()
+        {
+            if (leftClickMenu != null) leftClickMenu.Dispose();
+            leftClickMenu = new ContextMenuStrip { BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black, ShowImageMargin = false, ShowCheckMargin = false };
+            
+            foreach (var cat in categories) {
+                var catItem = new ToolStripMenuItem(cat.Name == DefaultCategory ? T("allPrograms") : cat.Name);
+                catItem.DropDown.BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White;
+                catItem.DropDown.ForeColor = currentIsDark ? Color.White : Color.Black;
+                if (catItem.DropDown is ToolStripDropDownMenu ddm) {
+                    ddm.ShowImageMargin = true; ddm.ShowCheckMargin = false;
+                    ddm.Renderer = new DarkRenderer(new DarkColorTable(ddm.BackColor));
+                }
+                
+                var catPrograms = cat.Name == DefaultCategory ? programs : programs.Where(p => p.Category == cat.Name).ToList();
+                
+                if (catPrograms.Count > 0) {
+                    foreach (var p in catPrograms) {
+                        var pItem = new ToolStripMenuItem(p.Name);
+                        try { if (p.Icon != null) pItem.Image = p.Icon.ToBitmap(); } catch {}
+                        pItem.Click += (s, e) => p.Start();
+                        catItem.DropDownItems.Add(pItem);
+                    }
+                } else {
+                    catItem.DropDownItems.Add(new ToolStripMenuItem("(Tom)") { Enabled = false });
+                }
+                leftClickMenu.Items.Add(catItem);
+            }
+            
+            leftClickMenu.Items.Add(new ToolStripSeparator());
+            var openUiItem = new ToolStripMenuItem(T("showPrograms"));
+            openUiItem.Font = new Font(openUiItem.Font, FontStyle.Bold);
+            openUiItem.Click += (s, e) => ShowProgramList();
+            leftClickMenu.Items.Add(openUiItem);
+
+            Type t = typeof(NotifyIcon);
+            var mi = t.GetMethod("ShowContextMenu", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            if (mi != null) {
+                notifyIcon.ContextMenuStrip = leftClickMenu;
+                mi.Invoke(notifyIcon, null);
+                notifyIcon.ContextMenuStrip = contextMenu;
+            } else {
+                leftClickMenu.Show(Cursor.Position);
+            }
         }
 
         protected override void WndProc(ref Message m)
@@ -277,21 +381,27 @@ namespace WindowsSmartTaskbar
         {
             if (programPanel == null) return;
             programPanel.SuspendLayout();
-            programPanel.Controls.Clear(); selectedIndices.Clear();
+            
+            foreach (Control ctrl in scrollContainer.Controls) {
+                if (ctrl is Panel row) {
+                    foreach (Control inner in row.Controls) {
+                        if (inner is Panel card) {
+                            foreach (Control sub in card.Controls) if (sub is PictureBox pb && pb.Image != null) { pb.Image.Dispose(); pb.Image = null; }
+                        }
+                    }
+                }
+                ctrl.Dispose();
+            }
+            scrollContainer.Controls.Clear();
+            selectedPrograms.Clear();
+
             var filtered = currentCategory == DefaultCategory ? programs.ToList() : programs.Where(p => p.Category == currentCategory).ToList();
             if (!string.IsNullOrWhiteSpace(searchFilter)) filtered = filtered.Where(p => p.Name.Contains(searchFilter, StringComparison.OrdinalIgnoreCase)).ToList();
-            for (int i = filtered.Count - 1; i >= 0; i--) programPanel.Controls.Add(CreateProgramRow(filtered[i], i));
+            for (int i = 0; i < filtered.Count; i++) scrollContainer.Controls.Add(CreateProgramRow(filtered[i], i));
+            scrollContainer.Height = filtered.Count * 95;
             programPanel.ResumeLayout();
             UpdateStatus();
-            
-            this.AllowDrop = true;
-            this.DragEnter += MainForm_DragEnter;
-            this.DragDrop += MainForm_DragDrop;
-
-            statusTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-            statusTimer.Tick += StatusTimer_Tick;
-            statusTimer.Start();
-
+            UpdateScrollBar();
             ApplyTheme();
         }
 
@@ -300,8 +410,10 @@ namespace WindowsSmartTaskbar
             var rowWrapper = new Panel { Height = 95, Dock = DockStyle.Top, BackColor = Color.Transparent, Padding = new Padding(0, 5, 0, 5), Tag = program };
             var card = new Panel { Height = 85, Dock = DockStyle.Fill, BackColor = Color.FromArgb(45, 45, 52), Cursor = Cursors.Hand, Tag = program };
             rowWrapper.Controls.Add(card); card.SizeChanged += (s, e) => SetRoundedRegion(card, 20);
+            card.DoubleClick += (s, e) => program.Start();
             
-            var iconBox = new PictureBox { Size = new Size(48, 48), Location = new Point(15, 18), SizeMode = PictureBoxSizeMode.StretchImage };
+            var iconBox = new PictureBox { Size = new Size(48, 48), Location = new Point(15, 18), SizeMode = PictureBoxSizeMode.StretchImage, Cursor = Cursors.Hand };
+            iconBox.DoubleClick += (s, e) => program.Start();
             try { if (program.Icon != null) iconBox.Image = program.Icon.ToBitmap(); } catch {}
             var nameLabel = new Label { Text = program.Name, Font = new Font("Segoe UI Semibold", 12), ForeColor = currentIsDark ? Color.White : Color.Black, Location = new Point(80, 18), AutoSize = true, BackColor = Color.Transparent };
             var pathLabel = new Label { Text = Path.GetFileName(program.FilePath), Font = new Font("Segoe UI", 9), ForeColor = currentIsDark ? Color.FromArgb(200, 200, 200) : Color.FromArgb(100, 100, 100), Location = new Point(80, 45), AutoSize = true, BackColor = Color.Transparent };
@@ -317,7 +429,7 @@ namespace WindowsSmartTaskbar
             deleteBtn.MouseEnter += (s, e) => deleteBtn.ForeColor = Color.FromArgb(220, 53, 69);
             deleteBtn.MouseLeave += (s, e) => deleteBtn.ForeColor = currentIsDark ? Color.Gray : Color.DarkGray;
             deleteBtn.Click += (s, e) => {
-                if (MessageBox.Show($"Vill du verkligen ta bort {program.Name}?", "Bekr\u00e4fta", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
+                if (MessageBox.Show($"{T("confirmDelete")}'{program.Name}'?", T("confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
                     programs.Remove(program); SavePrograms(); RefreshProgramList();
                 }
             };
@@ -335,30 +447,76 @@ namespace WindowsSmartTaskbar
                     if (form.ShowDialog() == DialogResult.OK) { SavePrograms(); RefreshProgramList(); }
                 }
             };
-            // Context Menu for Programs
-            var cms = new ContextMenuStrip { BackColor = Color.FromArgb(45, 45, 52), ForeColor = Color.White };
-            var editItem = new ToolStripMenuItem("Byt namn på program");
-            editItem.Click += (s, e) => {
-                showRename();
-            };
-            var deleteItem = new ToolStripMenuItem("Ta bort program");
-            deleteItem.Click += (s, e) => {
-                if (MessageBox.Show($"Vill du ta bort {program.Name}?", "Bekr\u00e4fta", MessageBoxButtons.YesNo) == DialogResult.Yes) {
-                    programs.Remove(program); SavePrograms(); RefreshProgramList();
+            var cms = new ContextMenuStrip { BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black, ShowImageMargin = true, ShowCheckMargin = false };
+            cms.Renderer = new DarkRenderer(new DarkColorTable(cms.BackColor));
+            cms.Opening += (s, e) => {
+                cms.Items.Clear();
+                var moveMenu = new ToolStripMenuItem(selectedPrograms.Count > 1 ? T("moveMultiple") : T("moveToCat"));
+                moveMenu.DropDown.BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White;
+                moveMenu.DropDown.ForeColor = currentIsDark ? Color.White : Color.Black;
+                if (moveMenu.DropDown is ToolStripDropDownMenu dm) {
+                    dm.ShowImageMargin = true; dm.ShowCheckMargin = false;
+                    dm.Renderer = new DarkRenderer(new DarkColorTable(dm.BackColor));
                 }
+                foreach (var cat in categories.Where(c => c.Name != DefaultCategory)) {
+                    var cItem = new ToolStripMenuItem(cat.Name);
+                    cItem.Click += (se, ev) => {
+                        var targets = selectedPrograms.Count > 0 && selectedPrograms.Contains(program) ? selectedPrograms.ToList() : new List<ProgramItem> { program };
+                        foreach (var t in targets) t.Category = cat.Name;
+                        selectedPrograms.Clear();
+                        SavePrograms(); RefreshProgramList();
+                    };
+                    moveMenu.DropDownItems.Add(cItem);
+                }
+                if (moveMenu.DropDownItems.Count == 0) moveMenu.Enabled = false;
+                cms.Items.Add(moveMenu);
+                
+                var editItem = new ToolStripMenuItem(T("editName"));
+                editItem.Click += (se, ev) => showRename();
+                cms.Items.Add(editItem);
+
+                cms.Items.Add(new ToolStripSeparator());
+                var deleteItem = new ToolStripMenuItem(T("remove"));
+                deleteItem.Click += (se, ev) => {
+                    var targets = selectedPrograms.Count > 0 && selectedPrograms.Contains(program) ? selectedPrograms.ToList() : new List<ProgramItem> { program };
+                    if (MessageBox.Show($"{T("confirmDelete")}'{(targets.Count > 1 ? targets.Count + " " + T("programs") : program.Name)}'?", T("confirm"), MessageBoxButtons.YesNo) == DialogResult.Yes) {
+                        foreach (var t in targets) programs.Remove(t);
+                        selectedPrograms.Clear();
+                        SavePrograms(); RefreshProgramList();
+                    }
+                };
+                cms.Items.Add(deleteItem);
             };
-            cms.Items.Add(editItem);
-            cms.Items.Add(new ToolStripSeparator());
-            cms.Items.Add(deleteItem);
             card.ContextMenuStrip = cms;
             iconBox.ContextMenuStrip = cms; nameLabel.ContextMenuStrip = cms; pathLabel.ContextMenuStrip = cms;
+
+            Action toggleSelect = () => {
+                if (selectedPrograms.Contains(program)) {
+                    selectedPrograms.Remove(program);
+                    card.BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White;
+                } else {
+                    selectedPrograms.Add(program);
+                    card.BackColor = currentIsDark ? Color.FromArgb(20, 60, 90) : Color.FromArgb(200, 220, 255);
+                }
+            };
+            
+            if (selectedPrograms.Contains(program)) card.BackColor = currentIsDark ? Color.FromArgb(20, 60, 90) : Color.FromArgb(200, 220, 255);
 
             // Enhanced Interaction Logic
             Point mouseDownPos = Point.Empty;
             bool dragThresholdMet = false;
+            
+            var holdTimer = new System.Windows.Forms.Timer { Interval = 600 };
+            holdTimer.Tick += (s, e) => {
+                holdTimer.Stop();
+                if (!isDragging && !dragThresholdMet) toggleSelect();
+            };
 
             MouseEventHandler onDown = (s, e) => {
                 if (e.Button == MouseButtons.Left) {
+                    toggleSelect();
+                    if (Control.ModifierKeys.HasFlag(Keys.Control)) { return; }
+                    holdTimer.Start();
                     isDragging = false; 
                     dragThresholdMet = false;
                     draggedProgram = program; 
@@ -372,6 +530,7 @@ namespace WindowsSmartTaskbar
                 if (draggedControl != null && Control.MouseButtons == MouseButtons.Left) {
                     var curPos = Cursor.Position;
                     if (!dragThresholdMet && (Math.Abs(curPos.X - mouseDownPos.X) > 5 || Math.Abs(curPos.Y - mouseDownPos.Y) > 5)) {
+                        holdTimer.Stop();
                         dragThresholdMet = true;
                         isDragging = true;
                         card.BackColor = Color.FromArgb(60, 60, 70);
@@ -385,8 +544,10 @@ namespace WindowsSmartTaskbar
             };
 
             MouseEventHandler onUp = (s, e) => {
+                holdTimer.Stop();
                 if (isDragging) {
-                    isDragging = false; card.BackColor = Color.FromArgb(45, 45, 52);
+                    isDragging = false;
+                    card.BackColor = selectedPrograms.Contains(program) ? (currentIsDark ? Color.FromArgb(20, 60, 90) : Color.FromArgb(200, 220, 255)) : (currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White);
                     var currentOrder = programPanel.Controls.OfType<Panel>().Select(p => (ProgramItem)p.Tag).Reverse().ToList();
                     programs = currentOrder;
                     SavePrograms(); RefreshProgramList();
@@ -460,9 +621,6 @@ namespace WindowsSmartTaskbar
             File.WriteAllText(CategoryFile, JsonSerializer.Serialize(toSave, new JsonSerializerOptions { WriteIndented = true }));
         }
 
-        private void LoadSettings() { if (File.Exists(SettingsFile)) { var json = File.ReadAllText(SettingsFile); try { var s = JsonSerializer.Deserialize<AppSettings>(json); if (s != null) { currentLanguage = s.Language ?? "sv"; currentTheme = s.Theme ?? "dark"; } } catch {} } }
-        private void SaveSettings() { var s = new AppSettings { Language = currentLanguage, Theme = currentTheme }; File.WriteAllText(SettingsFile, JsonSerializer.Serialize(s)); }
-
         private string T(string key)
         {
             if (currentLanguage == "sv") {
@@ -476,8 +634,54 @@ namespace WindowsSmartTaskbar
                     case "showPrograms": return "Visa program";
                     case "exit": return "Avsluta";
                     case "programs": return "program";
-                    default: return key;
+                    case "settings": return "Inst\u00e4llningar";
+                    case "confirmDelete": return "Vill du verkligen ta bort ";
+                    case "confirmDeleteCat": return "Vill du verkligen radera kategorin ";
+                    case "confirm": return "Bekr\u00e4fta";
+                    case "clearCatFirst": return "Rensa kategorin f\u00f6rst!";
+                    case "maxReached": return "Maxgr\u00e4ns n\u00e5dd: ";
+                    case "moveToCat": return "Flytta till kategori";
+                    case "moveMultiple": return "Flytta markerade till...";
                 }
+            } else if (currentLanguage == "tr") {
+                switch (key) {
+                    case "addProgram": return "Ekle";
+                    case "remove": return "Sil";
+                    case "editName": return "D\u00fczenle";
+                    case "addCategory": return "KategoriEkle";
+                    case "search": return "Ara...";
+                    case "allPrograms": return "T\u00fcm Programlar";
+                    case "showPrograms": return "Programlar\u0131 G\u00f6ster";
+                    case "exit": return "\u00c7\u0131k\u0131\u015f";
+                    case "programs": return "program";
+                    case "settings": return "Ayarlar";
+                    case "confirmDelete": return "Ger\u00e7ekten silmek istiyor musunuz: ";
+                    case "confirmDeleteCat": return "Kategoriyi ger\u00e7ekten silmek istiyor musunuz: ";
+                    case "confirm": return "Onayla";
+                    case "clearCatFirst": return "\u00d6nce kategoriyi temizleyin!";
+                    case "maxReached": return "Maksimum s\u00e4n\u0131ra ula\u015f\u0131ld\u0131: ";
+                    case "moveToCat": return "Kategoriye ta\u015f\u0131";
+                    case "moveMultiple": return "Se\u00e7ilileri ta\u015f\u0131...";
+                }
+            }
+            switch (key) {
+                case "addProgram": return "Add Program";
+                case "remove": return "Remove";
+                case "editName": return "Edit Name";
+                case "addCategory": return "New Category";
+                case "search": return "Search...";
+                case "allPrograms": return "All Programs";
+                case "showPrograms": return "Show Programs";
+                case "exit": return "Exit";
+                case "programs": return "programs";
+                case "settings": return "Settings";
+                case "confirmDelete": return "Are you sure you want to delete ";
+                case "confirmDeleteCat": return "Are you sure you want to delete category ";
+                case "confirm": return "Confirm";
+                case "clearCatFirst": return "Clear category first!";
+                case "maxReached": return "Max limit reached: ";
+                case "moveToCat": return "Move to category";
+                case "moveMultiple": return "Move selected to...";
             }
             return key;
         }
@@ -520,9 +724,9 @@ namespace WindowsSmartTaskbar
         private void RemoveButton_Click(object? sender, EventArgs e) {
             if (currentCategory == DefaultCategory) return;
             if (programs.Any(p => p.Category == currentCategory)) {
-                MessageBox.Show("Rensa kategorin f\u00f6rst!") ; return;
+                MessageBox.Show(T("clearCatFirst")); return;
             }
-            if (MessageBox.Show($"Vill du verkligen radera kategorin '{currentCategory}'?", "Bekr\u00e4fta", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
+            if (MessageBox.Show($"{T("confirmDeleteCat")} '{currentCategory}'?", T("confirm"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) {
                 categories.RemoveAll(c => c.Name == currentCategory);
                 currentCategory = DefaultCategory;
                 SaveCategories(); RefreshCategories(); RefreshProgramList();
@@ -573,14 +777,22 @@ namespace WindowsSmartTaskbar
 
         private void ApplyTheme()
         {
-            currentIsDark = IsSystemDarkTheme();
+            if (currentTheme == "auto" || string.IsNullOrEmpty(currentTheme)) {
+                currentIsDark = IsSystemDarkTheme();
+            } else {
+                currentIsDark = currentTheme == "dark";
+            }
+            Color bgRoot = currentIsDark ? Color.FromArgb(18, 18, 21) : Color.FromArgb(230, 230, 230);
             Color bgMain = currentIsDark ? Color.FromArgb(32, 32, 35) : Color.FromArgb(243, 243, 243);
             Color bgCard = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White;
             Color textMain = currentIsDark ? Color.White : Color.Black;
             Color textDim = currentIsDark ? Color.FromArgb(200, 200, 200) : Color.FromArgb(100, 100, 100);
 
-            this.BackColor = bgMain;
-            if (mainContainer != null) mainContainer.BackColor = bgMain;
+            this.BackColor = bgRoot;
+            if (mainContainer != null) mainContainer.BackColor = bgRoot;
+            if (titleContainer != null) titleContainer.BackColor = bgRoot;
+            if (titleBack != null) titleBack.BackColor = bgMain;
+            if (footer != null) footer.BackColor = currentIsDark ? Color.FromArgb(30, 30, 35) : Color.FromArgb(225, 225, 230);
             if (titleLabel != null) titleLabel.ForeColor = textMain;
             
             if (searchBox != null) {
@@ -609,6 +821,57 @@ namespace WindowsSmartTaskbar
             }
             if (statusLabel != null) statusLabel.ForeColor = textDim;
             if (copyrightLabel != null) copyrightLabel.ForeColor = textDim;
+            if (scrollThumb != null) scrollThumb.BackColor = currentIsDark ? Color.FromArgb(80, 80, 90) : Color.FromArgb(180, 180, 190);
+        }
+
+        private void DoScroll(int delta)
+        {
+            if (scrollContainer == null || programPanel == null) return;
+            int totalHeight = scrollContainer.Height;
+            int viewportHeight = programPanel.Height;
+            if (totalHeight <= viewportHeight) { currentScrollPos = 0; scrollContainer.Top = 0; UpdateScrollBar(); return; }
+
+            currentScrollPos = Math.Clamp(currentScrollPos - delta, 0, totalHeight - viewportHeight);
+            scrollContainer.Top = -currentScrollPos;
+            UpdateScrollBar();
+        }
+
+        private void UpdateScrollBar()
+        {
+            if (programPanel == null || scrollContainer == null) return;
+            int totalHeight = scrollContainer.Height;
+            int viewportHeight = programPanel.Height;
+
+            if (totalHeight <= viewportHeight) {
+                scrollTrack.Visible = false;
+                currentScrollPos = 0;
+                scrollContainer.Top = 0;
+                return;
+            }
+
+            scrollTrack.Visible = true;
+            scrollTrack.BackColor = currentIsDark ? Color.FromArgb(30, 30, 35) : Color.FromArgb(220, 220, 225);
+            
+            float ratio = (float)viewportHeight / totalHeight;
+            scrollThumb.Height = Math.Max(20, (int)(scrollTrack.Height * ratio));
+            
+            float scrollRatio = (float)currentScrollPos / (totalHeight - viewportHeight);
+            scrollThumb.Top = (int)((scrollTrack.Height - scrollThumb.Height) * scrollRatio);
+        }
+
+        private void SetScrollFromThumb(int y)
+        {
+            int trackMax = scrollTrack.Height - scrollThumb.Height;
+            if (trackMax <= 0) return;
+            y = Math.Clamp(y, 0, trackMax);
+            
+            float scrollRatio = (float)y / trackMax;
+            int totalHeight = scrollContainer.Height;
+            int viewportHeight = programPanel.Height;
+            
+            currentScrollPos = (int)((totalHeight - viewportHeight) * scrollRatio);
+            scrollContainer.Top = -currentScrollPos;
+            UpdateScrollBar();
         }
 
         private void MainForm_DragEnter(object? sender, DragEventArgs e)
@@ -625,20 +888,22 @@ namespace WindowsSmartTaskbar
 
         private void MainForm_DragDrop(object? sender, DragEventArgs e)
         {
-            if (e.Data == null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
-            string[] files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
-            bool added = false;
-            foreach (string file in files) {
-                if (file.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)) {
-                    if (programs.Count >= MaxPrograms) { MessageBox.Show($"Maxgräns på {MaxPrograms} program nådd."); break; }
-                    if (!programs.Any(p => p.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase))) {
-                        string name = Path.GetFileNameWithoutExtension(file);
-                        programs.Add(new ProgramItem(name, file) { Category = currentCategory });
-                        added = true;
-                    }
+            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) {
+                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+                var exeFiles = files.Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)).ToList();
+                
+                if (programs.Count + exeFiles.Count > MaxPrograms) {
+                    MessageBox.Show(T("maxReached") + MaxPrograms);
+                    return;
                 }
+
+                foreach (var path in exeFiles) {
+                    string name = Path.GetFileNameWithoutExtension(path);
+                    programs.Add(new ProgramItem(name, path) { Category = currentCategory == DefaultCategory ? "All programs" : currentCategory });
+                }
+                SavePrograms();
+                RefreshProgramList();
             }
-            if (added) { SavePrograms(); RefreshProgramList(); }
         }
 
         private void StatusTimer_Tick(object? sender, EventArgs e)
@@ -650,17 +915,128 @@ namespace WindowsSmartTaskbar
                 foreach (var p in processes) {
                     try { running.Add(p.ProcessName); } catch {}
                 }
-                foreach (Control rowWrapper in programPanel.Controls) {
+                foreach (Control rowWrapper in scrollContainer.Controls) {
                     if (rowWrapper.Controls.Count > 0 && rowWrapper.Controls[0] is Panel card) {
                         if (card.Tag is ProgramItem prog) {
                             string exeName = Path.GetFileNameWithoutExtension(prog.FilePath);
                             bool isRunning = running.Contains(exeName);
                             var dot = card.Controls.OfType<Panel>().FirstOrDefault(c => c.Width == 10 && c.Height == 10);
-                            if (dot != null) dot.BackColor = isRunning ? Color.LimeGreen : Color.Transparent;
+                            if (dot != null) dot.BackColor = isRunning ? Color.LimeGreen : Color.FromArgb(220, 53, 69);
                         }
                     }
                 }
             } catch {}
+        }
+
+        private void LoadSettings()
+        {
+            if (File.Exists(SettingsFile)) {
+                try {
+                    var json = File.ReadAllText(SettingsFile);
+                    var node = JsonSerializer.Deserialize<SettingsData>(json);
+                    if (node != null) appSettings = node;
+                } catch {}
+            }
+            if (appSettings.Language == "auto") {
+                string sysLang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
+                currentLanguage = (sysLang == "sv" || sysLang == "tr") ? sysLang : "en";
+            } else {
+                currentLanguage = appSettings.Language;
+            }
+            currentTheme = appSettings.Theme;
+        }
+
+        private void SaveSettings()
+        {
+            try {
+                File.WriteAllText(SettingsFile, JsonSerializer.Serialize(appSettings));
+            } catch {}
+        }
+
+        private void ApplyLanguage()
+        {
+            if (searchBox != null) searchBox.PlaceholderText = T("search");
+            try {
+                if (actionGrid != null && actionGrid.Controls.Count >= 4) {
+                    ((Label)((Panel)actionGrid.GetControlFromPosition(0,0)).Controls[1]).Text = T("addProgram");
+                    ((Label)((Panel)actionGrid.GetControlFromPosition(1,0)).Controls[1]).Text = T("remove");
+                    ((Label)((Panel)actionGrid.GetControlFromPosition(2,0)).Controls[1]).Text = T("editName");
+                    ((Label)((Panel)actionGrid.GetControlFromPosition(3,0)).Controls[1]).Text = T("addCategory");
+                }
+            } catch {}
+            
+            if (catLabel != null) catLabel.Text = currentCategory == DefaultCategory ? T("allPrograms") : currentCategory;
+            UpdateStatus();
+            BuildAndShowLeftClickMenu();
+        }
+
+        private void ShowSettingsDialog()
+        {
+            using (var form = new Form { Text = T("settings"), Size = new Size(350, 300), StartPosition = FormStartPosition.CenterScreen, BackColor = currentIsDark ? Color.FromArgb(32, 32, 35) : Color.FromArgb(243, 243, 243), ForeColor = currentIsDark ? Color.White : Color.Black, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false }) {
+                
+                var topPanel = new Panel { Dock = DockStyle.Top, Height = 180, Padding = new Padding(20) };
+                
+                var lblLang = new Label { Text = "Language / Spr\u00e5k / Dil:", Dock = DockStyle.Top, Height = 30 };
+                var cmbLang = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Height = 30, BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black };
+                cmbLang.Items.AddRange(new string[] { "Auto (System)", "Svenska", "English", "T\u00fcrk\u00e7e" });
+                cmbLang.SelectedIndex = appSettings.Language == "sv" ? 1 : appSettings.Language == "en" ? 2 : appSettings.Language == "tr" ? 3 : 0;
+                
+                var spacer = new Panel { Dock = DockStyle.Top, Height = 10 };
+                
+                var lblTheme = new Label { Text = "Theme / Tema:", Dock = DockStyle.Top, Height = 30, Padding = new Padding(0, 10, 0, 0) };
+                var cmbTheme = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Height = 30, BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black };
+                cmbTheme.Items.AddRange(new string[] { "Auto (System)", "Dark / M\u00f6rkt", "Light / Ljust" });
+                cmbTheme.SelectedIndex = appSettings.Theme == "light" ? 2 : appSettings.Theme == "dark" ? 1 : 0;
+                
+                topPanel.Controls.Add(cmbTheme);
+                topPanel.Controls.Add(lblTheme);
+                topPanel.Controls.Add(spacer);
+                topPanel.Controls.Add(cmbLang);
+                topPanel.Controls.Add(lblLang);
+                
+                var btnSave = new Button { Text = "Spara / Save / Kaydet", Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White };
+                btnSave.Click += (s, e) => {
+                    appSettings.Language = cmbLang.SelectedIndex == 1 ? "sv" : cmbLang.SelectedIndex == 2 ? "en" : cmbLang.SelectedIndex == 3 ? "tr" : "auto";
+                    appSettings.Theme = cmbTheme.SelectedIndex == 1 ? "dark" : cmbTheme.SelectedIndex == 2 ? "light" : "auto";
+                    
+                    if (appSettings.Language == "auto") {
+                        string sysLang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
+                        currentLanguage = (sysLang == "sv" || sysLang == "tr") ? sysLang : "en";
+                    } else {
+                        currentLanguage = appSettings.Language;
+                    }
+                    currentTheme = appSettings.Theme;
+                    SaveSettings();
+                    ApplyTheme();
+                    ApplyLanguage();
+                    form.Close();
+                };
+                
+                form.Controls.Add(topPanel);
+                form.Controls.Add(btnSave);
+                form.ShowDialog();
+            }
+        }
+        public class DarkRenderer : ToolStripProfessionalRenderer {
+            public DarkRenderer(ProfessionalColorTable table) : base(table) { }
+            protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e) {
+                using (var b = new SolidBrush(e.ToolStrip.BackColor)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+            }
+            protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) {
+                using (var b = new SolidBrush(e.ToolStrip.BackColor)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+            }
+        }
+        public class DarkColorTable : ProfessionalColorTable {
+            private Color bg;
+            public DarkColorTable(Color c) { bg = c; }
+            public override Color ImageMarginGradientBegin => bg;
+            public override Color ImageMarginGradientMiddle => bg;
+            public override Color ImageMarginGradientEnd => bg;
+            public override Color ToolStripDropDownBackground => bg;
+            public override Color MenuItemSelected => Color.FromArgb(65, 65, 75);
+            public override Color MenuItemBorder => Color.Transparent;
+            public override Color MenuItemSelectedGradientBegin => Color.FromArgb(65, 65, 75);
+            public override Color MenuItemSelectedGradientEnd => Color.FromArgb(65, 65, 75);
         }
     }
 }
