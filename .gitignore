@@ -45,8 +45,12 @@ plans/*.pdb
 # OS/system files
 .DS_Store
 Thumbs.db
+NUL
 
 # Common build/dependency folders
 dist/
 out/
 node_modules/
+publish/
+*.zip
+

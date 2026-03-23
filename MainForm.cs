@@ -47,6 +47,7 @@ namespace WindowsSmartTaskbar
         public class SettingsData {
             public string Language { get; set; } = "auto";
             public string Theme { get; set; } = "auto";
+            public bool Autostart { get; set; } = true;
         }
         private SettingsData appSettings = new SettingsData();
 
@@ -90,7 +91,9 @@ namespace WindowsSmartTaskbar
         public MainForm()
         {
             EnsureDataFolder();
+            bool firstRun = !File.Exists(SettingsFile);
             LoadSettings();
+            if (firstRun) SaveSettings();
             LoadCategories();
             LoadPrograms();
             
@@ -642,6 +645,7 @@ namespace WindowsSmartTaskbar
                     case "maxReached": return "Maxgr\u00e4ns n\u00e5dd: ";
                     case "moveToCat": return "Flytta till kategori";
                     case "moveMultiple": return "Flytta markerade till...";
+                    case "startWithWindows": return "Starta med Windows";
                 }
             } else if (currentLanguage == "tr") {
                 switch (key) {
@@ -662,6 +666,7 @@ namespace WindowsSmartTaskbar
                     case "maxReached": return "Maksimum s\u00e4n\u0131ra ula\u015f\u0131ld\u0131: ";
                     case "moveToCat": return "Kategoriye ta\u015f\u0131";
                     case "moveMultiple": return "Se\u00e7ilileri ta\u015f\u0131...";
+                    case "startWithWindows": return "Windows ile ba\u015flat";
                 }
             }
             switch (key) {
@@ -682,6 +687,7 @@ namespace WindowsSmartTaskbar
                 case "maxReached": return "Max limit reached: ";
                 case "moveToCat": return "Move to category";
                 case "moveMultiple": return "Move selected to...";
+                case "startWithWindows": return "Start with Windows";
             }
             return key;
         }
@@ -950,6 +956,19 @@ namespace WindowsSmartTaskbar
         {
             try {
                 File.WriteAllText(SettingsFile, JsonSerializer.Serialize(appSettings));
+                SetAutostart(appSettings.Autostart);
+            } catch {}
+        }
+
+        private void SetAutostart(bool enable)
+        {
+            try {
+                using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true)) {
+                    if (key != null) {
+                        if (enable) key.SetValue("WindowsSmartTaskbar", Application.ExecutablePath);
+                        else key.DeleteValue("WindowsSmartTaskbar", false);
+                    }
+                }
             } catch {}
         }
 
@@ -988,6 +1007,11 @@ namespace WindowsSmartTaskbar
                 cmbTheme.Items.AddRange(new string[] { "Auto (System)", "Dark / M\u00f6rkt", "Light / Ljust" });
                 cmbTheme.SelectedIndex = appSettings.Theme == "light" ? 2 : appSettings.Theme == "dark" ? 1 : 0;
                 
+                var chkAutostart = new CheckBox { Text = T("startWithWindows"), Dock = DockStyle.Top, Height = 40, Padding = new Padding(0, 5, 0, 0), Checked = appSettings.Autostart };
+                chkAutostart.FlatStyle = FlatStyle.Flat;
+                chkAutostart.ForeColor = currentIsDark ? Color.White : Color.Black;
+                
+                topPanel.Controls.Add(chkAutostart);
                 topPanel.Controls.Add(cmbTheme);
                 topPanel.Controls.Add(lblTheme);
                 topPanel.Controls.Add(spacer);
@@ -998,6 +1022,7 @@ namespace WindowsSmartTaskbar
                 btnSave.Click += (s, e) => {
                     appSettings.Language = cmbLang.SelectedIndex == 1 ? "sv" : cmbLang.SelectedIndex == 2 ? "en" : cmbLang.SelectedIndex == 3 ? "tr" : "auto";
                     appSettings.Theme = cmbTheme.SelectedIndex == 1 ? "dark" : cmbTheme.SelectedIndex == 2 ? "light" : "auto";
+                    appSettings.Autostart = chkAutostart.Checked;
                     
                     if (appSettings.Language == "auto") {
                         string sysLang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
