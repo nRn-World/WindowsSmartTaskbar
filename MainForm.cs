@@ -64,6 +64,12 @@ namespace WindowsSmartTaskbar
         private System.Windows.Forms.Timer? statusTimer;
         
         protected override void OnFormClosing(FormClosingEventArgs e) {
+            if (e.CloseReason == CloseReason.UserClosing && !isExiting) {
+                e.Cancel = true;
+                allowVisible = false;
+                this.Hide();
+                return;
+            }
             if (statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); }
             if (notifyIcon != null) { notifyIcon.Visible = false; notifyIcon.Dispose(); }
             base.OnFormClosing(e);
@@ -88,8 +94,13 @@ namespace WindowsSmartTaskbar
         private int scrollStartY = 0;
         private int currentScrollPos = 0;
 
-        public MainForm()
+        private bool allowVisible = true;
+        private bool isExiting = false;
+
+        public MainForm(bool autostart = false)
         {
+            if (autostart) allowVisible = false;
+
             EnsureDataFolder();
             bool firstRun = !File.Exists(SettingsFile);
             LoadSettings();
@@ -143,7 +154,7 @@ namespace WindowsSmartTaskbar
             var closeBtn = new Label { Text = "\uE8BB", Font = new Font("Segoe MDL2 Assets", 10), ForeColor = Color.White, Size = new Size(35, 30), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
             closeBtn.MouseEnter += (s, e) => closeBtn.BackColor = Color.FromArgb(232, 17, 35);
             closeBtn.MouseLeave += (s, e) => closeBtn.BackColor = Color.Transparent;
-            closeBtn.Click += (s, e) => this.Hide(); // Hide to tray instead of exit for taskbar app
+            closeBtn.Click += (s, e) => { allowVisible = false; this.Hide(); }; // Hide to tray instead of exit for taskbar app
 
             var minBtn = new Label { Text = "\uE921", Font = new Font("Segoe MDL2 Assets", 10), ForeColor = Color.White, Size = new Size(35, 30), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
             minBtn.MouseEnter += (s, e) => minBtn.BackColor = Color.FromArgb(64, 64, 64);
@@ -273,7 +284,7 @@ namespace WindowsSmartTaskbar
             var settingsItem = new ToolStripMenuItem(T("settings"));
             settingsItem.Click += (s, e) => ShowSettingsDialog();
             var exitMenuItem = new ToolStripMenuItem(T("exit"));
-            exitMenuItem.Click += (s, e) => Application.Exit();
+            exitMenuItem.Click += (s, e) => { isExiting = true; Application.Exit(); };
             contextMenu.Items.Add(settingsItem);
             contextMenu.Items.Add(exitMenuItem);
             notifyIcon.ContextMenuStrip = contextMenu;
@@ -358,18 +369,29 @@ namespace WindowsSmartTaskbar
 
         private void ToggleVisibility()
         {
-            if (this.Visible && this.WindowState != FormWindowState.Minimized) this.Hide();
+            if (this.Visible && this.WindowState != FormWindowState.Minimized) { allowVisible = false; this.Hide(); }
             else ShowProgramList();
         }
 
         private void ShowProgramList()
         {
+            allowVisible = true;
             this.ShowInTaskbar = true;
             this.WindowState = FormWindowState.Normal;
             this.Show();
             this.TopMost = true; this.Activate(); this.BringToFront(); this.Focus();
             SetForegroundWindow(this.Handle);
             this.TopMost = false;
+        }
+
+        protected override void SetVisibleCore(bool value)
+        {
+            if (!allowVisible)
+            {
+                value = false;
+                if (!this.IsHandleCreated) CreateHandle();
+            }
+            base.SetVisibleCore(value);
         }
 
         private void RefreshCategories()
@@ -965,7 +987,7 @@ namespace WindowsSmartTaskbar
             try {
                 using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true)) {
                     if (key != null) {
-                        if (enable) key.SetValue("WindowsSmartTaskbar", Application.ExecutablePath);
+                        if (enable) key.SetValue("WindowsSmartTaskbar", "\"" + Application.ExecutablePath + "\" -autostart");
                         else key.DeleteValue("WindowsSmartTaskbar", false);
                     }
                 }
