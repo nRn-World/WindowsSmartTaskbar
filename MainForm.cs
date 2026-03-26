@@ -99,7 +99,11 @@ namespace WindowsSmartTaskbar
 
         public MainForm(bool autostart = false)
         {
-            if (autostart) allowVisible = false;
+            if (autostart)
+            {
+                allowVisible = false;
+                this.ShowInTaskbar = false; // Don't show in taskbar when starting silently
+            }
 
             EnsureDataFolder();
             bool firstRun = !File.Exists(SettingsFile);
@@ -1008,7 +1012,8 @@ namespace WindowsSmartTaskbar
             
             if (catLabel != null) catLabel.Text = currentCategory == DefaultCategory ? T("allPrograms") : currentCategory;
             UpdateStatus();
-            BuildAndShowLeftClickMenu();
+            // Note: Do NOT call BuildAndShowLeftClickMenu() here - it would
+            // pop open the tray menu unexpectedly when settings are saved.
         }
 
         private void ShowSettingsDialog()
