@@ -96,13 +96,14 @@ namespace WindowsSmartTaskbar
 
         private bool allowVisible = true;
         private bool isExiting = false;
+        private bool isAutostart = false;
 
         public MainForm(bool autostart = false)
         {
+            isAutostart = autostart;
             if (autostart)
             {
                 allowVisible = false;
-                this.ShowInTaskbar = false; // Don't show in taskbar when starting silently
             }
 
             EnsureDataFolder();
@@ -113,11 +114,31 @@ namespace WindowsSmartTaskbar
             LoadPrograms();
             
             InitializeComponent();
+
+            // Must be set AFTER InitializeComponent to prevent reset
+            if (autostart)
+            {
+                this.ShowInTaskbar = false;
+                this.WindowState = FormWindowState.Minimized;
+                this.Opacity = 0;
+            }
+
             SetupNotifyIcon();
             
             RegisterHotKey(this.Handle, HOTKEY_ID, MOD_CONTROL | MOD_ALT, VK_W);
             RefreshCategories();
             RefreshProgramList();
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            if (isAutostart)
+            {
+                this.Hide();
+                this.ShowInTaskbar = false;
+                this.Opacity = 1; // Restore opacity for future shows
+            }
         }
 
         private void EnsureDataFolder()
