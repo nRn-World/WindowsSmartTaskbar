@@ -27,7 +27,7 @@ jobs:
         # Assuming your version tags are standard like v1.5.2
         run: |
           $ver = "${{ github.ref_name }}".TrimStart('v')
-          vpk pack -u WindowsSmartTaskbar -v $ver -p .\bin\Release\net8.0-windows\win-x64\publish -e WindowsSmartTaskbar.exe
+          vpk pack -u WindowsSmartTaskbar -v $ver -p .\bin\Release\net8.0-windows\win-x64\publish -e WindowsSmartTaskbar.exe --skipVeloAppCheck
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
