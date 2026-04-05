@@ -47,7 +47,7 @@ namespace WindowsSmartTaskbar
                         var newVersion = await manager.CheckForUpdatesAsync();
                         if (newVersion != null) {
                             await manager.DownloadUpdatesAsync(newVersion);
-                            manager.ApplyUpdatesAndRestart(newVersion);
+                            // Updates are now ready to be applied next time the app starts/restarts naturally
                         }
                     }
                 } catch { 
