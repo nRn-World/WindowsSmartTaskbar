@@ -2,6 +2,9 @@ using System;
 using System.Windows.Forms;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Velopack;
+using Velopack.Sources;
 
 namespace WindowsSmartTaskbar
 {
@@ -16,6 +19,8 @@ namespace WindowsSmartTaskbar
         [STAThread]
         static void Main(string[] args)
         {
+            VelopackApp.Build().Run();
+
             bool createdNew;
             mutex = new Mutex(true, "WindowsSmartTaskbar_SingleInstance_App", out createdNew);
             if (!createdNew)
@@ -31,6 +36,25 @@ namespace WindowsSmartTaskbar
             {
                 if (arg.Trim('"', '\'').Equals("-autostart", StringComparison.OrdinalIgnoreCase)) autostart = true;
             }
+
+            // Start an invisible background task to update the app quietly
+            Task.Run(async () => {
+                try {
+                    var source = new GithubSource("https://github.com/nRn-World/WindowsSmartTaskbar", string.Empty, false);
+                    var manager = new UpdateManager(source);
+                    
+                    if (manager.IsInstalled) {
+                        var newVersion = await manager.CheckForUpdatesAsync();
+                        if (newVersion != null) {
+                            await manager.DownloadUpdatesAsync(newVersion);
+                            manager.ApplyUpdatesAndRestart(newVersion);
+                        }
+                    }
+                } catch { 
+                    // Ignore fail silently if internet is down, rate limit, etc.
+                }
+            });
+
             Application.Run(new MainForm(autostart));
         }
     }

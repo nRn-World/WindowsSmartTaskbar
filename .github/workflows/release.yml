@@ -1,0 +1,35 @@
+name: Release WindowsSmartTaskbar
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish App
+        run: dotnet publish WindowsSmartTaskbar.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpack
+
+      - name: Build Velopack Release (.exe & .nupkg)
+        # Assuming your version tags are standard like v1.5.2
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          vpack pack -u WindowsSmartTaskbar -v $ver -p .\bin\Release\net8.0-windows\win-x64\publish -e WindowsSmartTaskbar.exe
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Releases/*
+          draft: false
+          prerelease: false
