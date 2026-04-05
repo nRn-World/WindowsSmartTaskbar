@@ -109,6 +109,7 @@ namespace WindowsSmartTaskbar
             EnsureDataFolder();
             bool firstRun = !File.Exists(SettingsFile);
             LoadSettings();
+            SetAutostart(appSettings.Autostart);
             if (firstRun) SaveSettings();
             LoadCategories();
             LoadPrograms();
@@ -119,8 +120,6 @@ namespace WindowsSmartTaskbar
             if (autostart)
             {
                 this.ShowInTaskbar = false;
-                this.WindowState = FormWindowState.Minimized;
-                this.Opacity = 0;
             }
 
             SetupNotifyIcon();
@@ -135,9 +134,7 @@ namespace WindowsSmartTaskbar
             base.OnLoad(e);
             if (isAutostart)
             {
-                this.Hide();
-                this.ShowInTaskbar = false;
-                this.Opacity = 1; // Restore opacity for future shows
+                this.Opacity = 1;
             }
         }
 
@@ -184,7 +181,7 @@ namespace WindowsSmartTaskbar
             var minBtn = new Label { Text = "\uE921", Font = new Font("Segoe MDL2 Assets", 10), ForeColor = Color.White, Size = new Size(35, 30), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
             minBtn.MouseEnter += (s, e) => minBtn.BackColor = Color.FromArgb(64, 64, 64);
             minBtn.MouseLeave += (s, e) => minBtn.BackColor = Color.Transparent;
-            minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
+            minBtn.Click += (s, e) => { allowVisible = false; this.Hide(); };
 
             controlButtons.Controls.Add(closeBtn);
             controlButtons.Controls.Add(minBtn);
@@ -368,12 +365,32 @@ namespace WindowsSmartTaskbar
             }
         }
 
+        private int WM_SHOWME = RegisterWindowMessage("WM_SHOWME_SMARTTASKBAR");
+        [DllImport("user32.dll")] public static extern int RegisterWindowMessage(string message);
+
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_SHOWME) {
+                if (this.InvokeRequired) this.Invoke(new MethodInvoker(ShowProgramList));
+                else ShowProgramList();
+            }
+            if (m.Msg == 0x0112 && (m.WParam.ToInt32() & 0xFFF0) == 0xF020) { 
+                allowVisible = false; this.Hide(); m.Result = IntPtr.Zero; return;
+            }
             base.WndProc(ref m);
             if (m.Msg == 0x0084 && (int)m.Result == 0x1) { m.Result = (IntPtr)0x2; } // HTCLIENT to HTCAPTION for smooth dragging
             if (m.Msg == 0x001A) { // WM_SETTINGCHANGE
                 ApplyTheme();
+            }
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.WindowState == FormWindowState.Minimized) {
+                this.WindowState = FormWindowState.Normal;
+                allowVisible = false;
+                this.Hide();
             }
         }
 
