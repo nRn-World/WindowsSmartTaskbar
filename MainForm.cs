@@ -768,6 +768,14 @@ namespace WindowsSmartTaskbar
 
         private Icon GenerateAppIcon() {
             try {
+                var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("WindowsSmartTaskbar.logo.png");
+                if (stream != null) {
+                    using (Bitmap bmp = new Bitmap(stream)) {
+                        using (Bitmap thumb = new Bitmap(bmp, new Size(32, 32))) {
+                            return Icon.FromHandle(thumb.GetHicon());
+                        }
+                    }
+                }
                 return Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
             } catch {
                 return SystemIcons.Application;
