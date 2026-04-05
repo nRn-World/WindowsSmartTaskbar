@@ -10,6 +10,7 @@
     <AssemblyTitle>WindowsSmartTaskbar</AssemblyTitle>
     <Description>En smart taskbar för att hantera och starta Windows-program</Description>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationIcon>logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

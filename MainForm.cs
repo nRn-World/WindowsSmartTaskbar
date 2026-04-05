@@ -758,29 +758,10 @@ namespace WindowsSmartTaskbar
         }
 
         private Icon GenerateAppIcon() {
-            using (Bitmap bmp = new Bitmap(256, 256)) {
-                using (Graphics g = Graphics.FromImage(bmp)) {
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
-                    g.Clear(Color.Transparent);
-
-                    // Premium Background Gradient
-                    var rect = new Rectangle(10, 10, 236, 236);
-                    using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
-                        path.AddEllipse(rect);
-                        using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(rect, Color.FromArgb(0, 120, 215), Color.FromArgb(0, 40, 100), 45f)) {
-                            g.FillPath(brush, path);
-                        }
-                    }
-
-                    // Stylized "S" / Checkmark Symbol
-                    using (Pen pen = new Pen(Color.White, 18)) {
-                        pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-                        g.DrawLine(pen, 70, 130, 110, 170);
-                        g.DrawLine(pen, 110, 170, 180, 80);
-                    }
-                }
-                IntPtr hIcon = bmp.GetHicon();
-                return Icon.FromHandle(hIcon);
+            try {
+                return Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+            } catch {
+                return SystemIcons.Application;
             }
         }
 
