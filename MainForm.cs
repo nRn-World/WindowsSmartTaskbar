@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using System.Diagnostics; // Added for Drag-and-Drop logic
+using Velopack;
 
 namespace WindowsSmartTaskbar
 {
@@ -1102,7 +1103,15 @@ namespace WindowsSmartTaskbar
                     form.Close();
                 };
                 
+                string verText = "Version: Dev";
+                try {
+                    var um = new UpdateManager(new Velopack.Sources.GithubSource("https://github.com/nRn-World/WindowsSmartTaskbar", string.Empty, false));
+                    if (um.IsInstalled && um.CurrentVersion != null) verText = "Version: " + um.CurrentVersion.ToString();
+                } catch {}
+                var lblVersion = new Label { Text = verText, Dock = DockStyle.Bottom, Height = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.Gray };
+                
                 form.Controls.Add(topPanel);
+                form.Controls.Add(lblVersion);
                 form.Controls.Add(btnSave);
                 form.ShowDialog();
             }
