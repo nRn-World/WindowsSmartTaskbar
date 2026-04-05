@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     permissions:
       contents: write
     steps:
@@ -18,7 +20,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Publish App
-        run: dotnet publish WindowsSmartTaskbar.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+        run: dotnet publish WindowsSmartTaskbar.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -v quiet
 
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk
