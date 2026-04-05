@@ -1048,6 +1048,10 @@ namespace WindowsSmartTaskbar
             } catch {}
             
             if (catLabel != null) catLabel.Text = currentCategory == DefaultCategory ? T("allPrograms") : currentCategory;
+            if (contextMenu != null && contextMenu.Items.Count >= 2) {
+                contextMenu.Items[0].Text = T("settings");
+                contextMenu.Items[1].Text = T("exit");
+            }
             UpdateStatus();
             // Note: Do NOT call BuildAndShowLeftClickMenu() here - it would
             // pop open the tray menu unexpectedly when settings are saved.
