@@ -711,6 +711,9 @@ namespace WindowsSmartTaskbar
                     case "moveToCat": return "Flytta till kategori";
                     case "moveMultiple": return "Flytta markerade till...";
                     case "startWithWindows": return "Starta med Windows";
+                    case "language": return "Spr\u00e5k";
+                    case "theme": return "Tema";
+                    case "save": return "Spara";
                 }
             } else if (currentLanguage == "tr") {
                 switch (key) {
@@ -732,6 +735,9 @@ namespace WindowsSmartTaskbar
                     case "moveToCat": return "Kategoriye ta\u015f\u0131";
                     case "moveMultiple": return "Se\u00e7ilileri ta\u015f\u0131...";
                     case "startWithWindows": return "Windows ile ba\u015flat";
+                    case "language": return "Dil";
+                    case "theme": return "Tema";
+                    case "save": return "Kaydet";
                 }
             }
             switch (key) {
@@ -753,6 +759,9 @@ namespace WindowsSmartTaskbar
                 case "moveToCat": return "Move to category";
                 case "moveMultiple": return "Move selected to...";
                 case "startWithWindows": return "Start with Windows";
+                case "language": return "Language";
+                case "theme": return "Theme";
+                case "save": return "Save";
             }
             return key;
         }
@@ -1042,14 +1051,14 @@ namespace WindowsSmartTaskbar
                 
                 var topPanel = new Panel { Dock = DockStyle.Top, Height = 180, Padding = new Padding(20) };
                 
-                var lblLang = new Label { Text = "Language / Spr\u00e5k / Dil:", Dock = DockStyle.Top, Height = 30 };
+                var lblLang = new Label { Text = T("language") + ":", Dock = DockStyle.Top, Height = 30 };
                 var cmbLang = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Height = 30, BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black };
                 cmbLang.Items.AddRange(new string[] { "Auto (System)", "Svenska", "English", "T\u00fcrk\u00e7e" });
                 cmbLang.SelectedIndex = appSettings.Language == "sv" ? 1 : appSettings.Language == "en" ? 2 : appSettings.Language == "tr" ? 3 : 0;
                 
                 var spacer = new Panel { Dock = DockStyle.Top, Height = 10 };
                 
-                var lblTheme = new Label { Text = "Theme / Tema:", Dock = DockStyle.Top, Height = 30, Padding = new Padding(0, 10, 0, 0) };
+                var lblTheme = new Label { Text = T("theme") + ":", Dock = DockStyle.Top, Height = 30, Padding = new Padding(0, 10, 0, 0) };
                 var cmbTheme = new ComboBox { Dock = DockStyle.Top, DropDownStyle = ComboBoxStyle.DropDownList, Height = 30, BackColor = currentIsDark ? Color.FromArgb(45, 45, 52) : Color.White, ForeColor = currentIsDark ? Color.White : Color.Black };
                 cmbTheme.Items.AddRange(new string[] { "Auto (System)", "Dark / M\u00f6rkt", "Light / Ljust" });
                 cmbTheme.SelectedIndex = appSettings.Theme == "light" ? 2 : appSettings.Theme == "dark" ? 1 : 0;
@@ -1065,7 +1074,27 @@ namespace WindowsSmartTaskbar
                 topPanel.Controls.Add(cmbLang);
                 topPanel.Controls.Add(lblLang);
                 
-                var btnSave = new Button { Text = "Spara / Save / Kaydet", Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White };
+                var btnSave = new Button { Text = T("save"), Dock = DockStyle.Bottom, Height = 50, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 120, 215), ForeColor = Color.White };
+                
+                string originalLang = currentLanguage;
+                cmbLang.SelectedIndexChanged += (s, e) => {
+                    string sel = cmbLang.SelectedIndex == 1 ? "sv" : cmbLang.SelectedIndex == 2 ? "en" : cmbLang.SelectedIndex == 3 ? "tr" : "auto";
+                    if (sel == "auto") {
+                        string sysLang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLower();
+                        currentLanguage = (sysLang == "sv" || sysLang == "tr") ? sysLang : "en";
+                    } else currentLanguage = sel;
+                    
+                    form.Text = T("settings");
+                    lblLang.Text = T("language") + ":";
+                    lblTheme.Text = T("theme") + ":";
+                    chkAutostart.Text = T("startWithWindows");
+                    btnSave.Text = T("save");
+                };
+
+                form.FormClosed += (s, e) => {
+                    currentLanguage = originalLang;
+                };
+
                 btnSave.Click += (s, e) => {
                     appSettings.Language = cmbLang.SelectedIndex == 1 ? "sv" : cmbLang.SelectedIndex == 2 ? "en" : cmbLang.SelectedIndex == 3 ? "tr" : "auto";
                     appSettings.Theme = cmbTheme.SelectedIndex == 1 ? "dark" : cmbTheme.SelectedIndex == 2 ? "light" : "auto";
@@ -1077,6 +1106,7 @@ namespace WindowsSmartTaskbar
                     } else {
                         currentLanguage = appSettings.Language;
                     }
+                    originalLang = currentLanguage; // Commit the language so FormClosed doesn't revert it
                     currentTheme = appSettings.Theme;
                     SaveSettings();
                     ApplyTheme();
