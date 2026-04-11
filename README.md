@@ -96,7 +96,7 @@ This project is **NOT** licensed under MIT. It is licensed under the **nRn World
 
 ## 🤝 Contributing
 
-Educational contributions are welcome! 
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before getting started.
 
 1. Fork the repository.
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
