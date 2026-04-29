@@ -259,6 +259,12 @@ namespace WindowsSmartTaskbar
             footer.MouseDown += (s, e) => dragAction(s, e);
             statusLabel = new Label { Text = "0/20 Programs", Dock = DockStyle.Left, Width = 150, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(20, 0, 0, 0), Font = new Font("Segoe UI", 10) };
             copyrightLabel = new Label { Text = "Created 2026 by \u00A9 nRn World", Dock = DockStyle.Fill, ForeColor = Color.Gray, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 20, 0), Font = new Font("Segoe UI", 10) };
+            copyrightLabel.SizeChanged += (s, e) => {
+                try {
+                    var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                    copyrightLabel.Text = version != null ? $"v{version.Major}.{version.Minor}.{version.Build} | Created 2026 by \u00A9 nRn World" : "Created 2026 by \u00A9 nRn World";
+                } catch { }
+            };
             footer.Controls.Add(statusLabel);
             footer.Controls.Add(copyrightLabel);
 
