@@ -43,8 +43,7 @@ namespace WindowsSmartTaskbar
                     IntPtr hIcon = SHGetFileInfo(path, 0, ref shfi, (uint)Marshal.SizeOf(shfi), SHGFI_ICON | SHGFI_LARGEICON);
                     if (hIcon != IntPtr.Zero)
                     {
-                        Icon = (Icon)System.Drawing.Icon.FromHandle(shfi.hIcon).Clone();
-                        DestroyIcon(shfi.hIcon);
+                        Icon = (Icon)Icon.FromHandle(shfi.hIcon).Clone();
                     }
                 }
             }

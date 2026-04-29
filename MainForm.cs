@@ -73,6 +73,7 @@ namespace WindowsSmartTaskbar
             }
             if (statusTimer != null) { statusTimer.Stop(); statusTimer.Dispose(); }
             if (notifyIcon != null) { notifyIcon.Visible = false; notifyIcon.Dispose(); }
+            UnregisterHotKey(this.Handle, HOTKEY_ID);
             base.OnFormClosing(e);
         }
         private TableLayoutPanel actionGrid = default!;
@@ -637,15 +638,15 @@ namespace WindowsSmartTaskbar
 
         private void CheckDragPositionOptimized(int mouseY)
         {
-            if (draggedControl == null) return;
+            if (draggedControl == null || scrollContainer == null) return;
             
-            foreach (Control ctrl in programPanel.Controls) {
-                if (ctrl == draggedControl) continue;
-                if (mouseY > ctrl.Top && mouseY < ctrl.Bottom) {
-                    var targetIdx = programPanel.Controls.GetChildIndex(ctrl);
-                    var currentIdx = programPanel.Controls.GetChildIndex(draggedControl);
+            foreach (Control rowWrapper in scrollContainer.Controls) {
+                if (rowWrapper == draggedControl) continue;
+                if (mouseY > rowWrapper.Top && mouseY < rowWrapper.Bottom) {
+                    var targetIdx = scrollContainer.Controls.GetChildIndex(rowWrapper);
+                    var currentIdx = scrollContainer.Controls.GetChildIndex(draggedControl);
                     if (targetIdx != currentIdx) {
-                        programPanel.Controls.SetChildIndex(draggedControl, targetIdx);
+                        scrollContainer.Controls.SetChildIndex(draggedControl, targetIdx);
                     }
                     return;
                 }
@@ -968,7 +969,7 @@ namespace WindowsSmartTaskbar
 
                 foreach (var path in exeFiles) {
                     string name = Path.GetFileNameWithoutExtension(path);
-                    programs.Add(new ProgramItem(name, path) { Category = currentCategory == DefaultCategory ? "All programs" : currentCategory });
+                    programs.Add(new ProgramItem(name, path) { Category = currentCategory == DefaultCategory ? DefaultCategory : currentCategory });
                 }
                 SavePrograms();
                 RefreshProgramList();
@@ -977,13 +978,15 @@ namespace WindowsSmartTaskbar
 
         private void StatusTimer_Tick(object? sender, EventArgs e)
         {
-            if (programs.Count == 0 || programPanel == null || programPanel.Controls.Count == 0) return;
+            if (programs.Count == 0 || programPanel == null || scrollContainer == null || scrollContainer.Controls.Count == 0) return;
             try {
-                var processes = Process.GetProcesses();
+                var programExeNames = programs.Select(p => Path.GetFileNameWithoutExtension(p.FilePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var running = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var p in processes) {
-                    try { running.Add(p.ProcessName); } catch {}
+                
+                foreach (var p in Process.GetProcesses().Where(proc => programExeNames.Contains(proc.ProcessName))) {
+                    running.Add(p.ProcessName);
                 }
+                
                 foreach (Control rowWrapper in scrollContainer.Controls) {
                     if (rowWrapper.Controls.Count > 0 && rowWrapper.Controls[0] is Panel card) {
                         if (card.Tag is ProgramItem prog) {
@@ -1040,10 +1043,14 @@ namespace WindowsSmartTaskbar
             if (searchBox != null) searchBox.PlaceholderText = T("search");
             try {
                 if (actionGrid != null && actionGrid.Controls.Count >= 4) {
-                    ((Label)((Panel)actionGrid.GetControlFromPosition(0,0)).Controls[1]).Text = T("addProgram");
-                    ((Label)((Panel)actionGrid.GetControlFromPosition(1,0)).Controls[1]).Text = T("remove");
-                    ((Label)((Panel)actionGrid.GetControlFromPosition(2,0)).Controls[1]).Text = T("editName");
-                    ((Label)((Panel)actionGrid.GetControlFromPosition(3,0)).Controls[1]).Text = T("addCategory");
+                    var col0 = actionGrid.GetControlFromPosition(0, 0);
+                    var col1 = actionGrid.GetControlFromPosition(1, 0);
+                    var col2 = actionGrid.GetControlFromPosition(2, 0);
+                    var col3 = actionGrid.GetControlFromPosition(3, 0);
+                    if (col0 != null && col0 is Panel p0 && p0.Controls.Count > 1) ((Label)p0.Controls[1]).Text = T("addProgram");
+                    if (col1 != null && col1 is Panel p1 && p1.Controls.Count > 1) ((Label)p1.Controls[1]).Text = T("remove");
+                    if (col2 != null && col2 is Panel p2 && p2.Controls.Count > 1) ((Label)p2.Controls[1]).Text = T("editName");
+                    if (col3 != null && col3 is Panel p3 && p3.Controls.Count > 1) ((Label)p3.Controls[1]).Text = T("addCategory");
                 }
             } catch {}
             

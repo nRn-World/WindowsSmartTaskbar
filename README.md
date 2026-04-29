@@ -58,22 +58,33 @@ This project is **NOT** licensed under MIT. It is licensed under the **nRn World
 
 ### Option 1: Quick Start (Recommended)
 
-1. Go to the [**Releases**](https://github.com/RobinAyzit/WindowsSmartTaskbar/releases) page.
-2. Download the latest portable archive (e.g., `WindowsSmartTaskbar-win-x64-portable.zip`).
+1. Go to the [**Releases**](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
+2. Download the latest portable archive (e.g., `WindowsSmartTaskbar-win-Portable.zip`).
 3. Extract the ZIP file to a location of your choice.
 4. Run `WindowsSmartTaskbar.exe`.
 
-### Option 2: Build from Source
+### Option 2: Setup Installer
 
-1. Clone the repository:
-    ```bash
-    git clone [https://github.com/RobinAyzit/WindowsSmartTaskbar.git](https://github.com/RobinAyzit/WindowsSmartTaskbar.git)
-    ```
-2. Open the project in Visual Studio or VS Code.
-3. Build and run using .NET 8 SDK:
-    ```bash
-    dotnet run
-    ```
+1. Go to the [**Releases**](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
+2. Download `WindowsSmartTaskbar-win-Setup.exe`.
+3. Run the installer and follow the prompts.
+
+### 🔄 Auto-Updates
+
+The app automatically checks for updates on startup. When a new version is available, it will be downloaded and installed quietly in the background. Your settings and programs are preserved during updates.
+
+---
+
+## ⬆️ How to Update
+
+**If you already have the app installed:**
+- The app automatically checks for updates each time it starts
+- Updates are downloaded and installed automatically
+- No manual download needed!
+
+**Manual update:**
+1. Download the latest version from the [Releases](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
+2. Replace the old executable with the new one.
 
 ---
 
