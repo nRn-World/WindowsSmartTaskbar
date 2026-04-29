@@ -1,7 +1,7 @@
-# Windows Smart Taskbar
+# Windows Smart Taskbar 🚀
 
 ![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-red.svg)
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](https://github.com/RobinAyzit/WindowsSmartTaskbar)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](https://github.com/nRn-World/WindowsSmartTaskbar)
 [![Language: C#](https://img.shields.io/badge/Language-C%23-239120.svg)](https://dotnet.microsoft.com/)
 
 ---
@@ -10,27 +10,27 @@
 
 This project is **NOT** licensed under MIT. It is licensed under the **nRn World Non-Commercial License**.
 
-* **Individuals & Students:** Free to download and use for personal education and private use only. You are **PROHIBITED** from generating any income or profit from this software or its code.
-* **Companies & Organizations:** You have no right to download or use this software in a professional environment without prior written consent.
-* **Monetization:** Any commercial use, sale, or redistribution for profit requires a paid license.
+*   **Individuals & Students:** Free to download and use for personal education and private use only. You are **PROHIBITED** from generating any income or profit from this software or its code.
+*   **Companies & Organizations:** You have no right to download or use this software in a professional environment without prior written consent.
+*   **Monetization:** Any commercial use, sale, or redistribution for profit requires a paid license.
 
 **To purchase commercial rights, contact:** [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)
 
 ---
 
-**Windows Smart Taskbar** is a modern, lightweight, and efficient productivity tool designed to declutter your Windows taskbar. It allows you to organize your frequently used applications into customizable categories, providing quick access via a clean system tray menu without overwhelming your screen.
+**Windows Smart Taskbar** is a modern, lightweight, and efficient productivity tool designed to declutter your Windows taskbar. Organize your frequently used applications into customizable categories and access them instantly via a clean system tray menu.
 
 ---
 
-## 🚀 Key Features
+## ✨ Key Features
 
-* **📂 Smart Organization**: Group your applications into custom categories (e.g., “Work”, “Games”, “Tools”).
-* **🖱️ Drag & Drop**: Intuitively add programs by dragging shortcuts or executables directly onto the window.
-* **⚡ Quick Access Menu**: Left-click the system tray icon to instantly access your categorized programs.
-* **🎨 Modern Interface**: Clean, dark-themed UI that respects your desktop aesthetics.
-* **💾 Portable**: No installation required. Runs as a single executable file.
-* **🌍 Multi-Language**: Built-in support for English, Turkish, and Swedish.
-* **🚀 Auto-Start**: Optional setting to launch automatically with Windows.
+*   **📂 Smart Organization**: Group applications into custom categories (e.g., “Work”, “Games”, “Tools”).
+*   **🖱️ Drag & Drop**: Intuitively add programs by dragging shortcuts or executables directly onto the window.
+*   **⚡ Quick Access Menu**: Left-click the system tray icon to instantly access your categorized programs.
+*   **🎨 Modern Design**: Sleek dark-themed UI with smooth animations and rounded corners.
+*   **🔄 Seamless Auto-Updates**: The app checks for updates in the background once a week and applies them silently. No manual downloads required!
+*   **🌍 Multi-Language**: Built-in support for English, Turkish, and Swedish.
+*   **🚀 Auto-Start**: Optional setting to launch automatically with Windows.
 
 ---
 
@@ -56,35 +56,25 @@ This project is **NOT** licensed under MIT. It is licensed under the **nRn World
 
 ## 📥 Download & Installation
 
-### Option 1: Quick Start (Recommended)
-
-1. Go to the [**Releases**](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
-2. Download the latest portable archive (e.g., `WindowsSmartTaskbar-win-Portable.zip`).
-3. Extract the ZIP file to a location of your choice.
-4. Run `WindowsSmartTaskbar.exe`.
-
-### Option 2: Setup Installer
-
+### 🚀 Recommended: Setup Installer
 1. Go to the [**Releases**](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
 2. Download `WindowsSmartTaskbar-win-Setup.exe`.
-3. Run the installer and follow the prompts.
+3. Run the installer. The app will install to your user folder for easy auto-updates.
 
-### 🔄 Auto-Updates
-
-The app automatically checks for updates on startup. When a new version is available, it will be downloaded and installed quietly in the background. Your settings and programs are preserved during updates.
+### 📦 Alternative: Portable Version
+1. Download the portable ZIP file from the [**Releases**](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
+2. Extract and run `WindowsSmartTaskbar.exe`.
 
 ---
 
-## ⬆️ How to Update
+## 🔄 Automatic Updates
 
-**If you already have the app installed:**
-- The app automatically checks for updates each time it starts
-- Updates are downloaded and installed automatically
-- No manual download needed!
+Windows Smart Taskbar features a built-in update system powered by **Velopack**:
+*   **Periodic Checks**: The app checks for new versions in the background once a week.
+*   **Silent Upgrade**: When an update is found, it downloads and installs itself automatically.
+*   **Self-Restart**: The app will briefly restart to apply the new version without any user intervention.
 
-**Manual update:**
-1. Download the latest version from the [Releases](https://github.com/nRn-World/WindowsSmartTaskbar/releases) page.
-2. Replace the old executable with the new one.
+> **Note:** If Windows SmartScreen warns you during the first installation, click **"More Info"** and then **"Run Anyway"**. This happens because the app is open-source and unsigned.
 
 ---
 
@@ -92,44 +82,33 @@ The app automatically checks for updates on startup. When a new version is avail
 
 1.  **Add Programs**: Drag and drop any `.exe` or shortcut into the main window.
 2.  **Create Categories**: Click **"Add Category"** to organize your workflow.
-3.  **Manage Your List**: Drag programs to reorder or right-click to change categories.
-4.  **System Tray**: Single-click for Quick Launch; Double-click for the main window.
+3.  **Manage Your List**: Drag programs to reorder or right-click to change categories/rename.
+4.  **System Tray**: 
+    *   **Left-click**: Open the Quick Launch menu.
+    *   **Right-click**: Access settings and exit.
+    *   **HotKey**: Use `Ctrl + Alt + W` to toggle the main window!
 
 ---
 
 ## 🛠️ Tech Stack
 
-* **Language**: C# (.NET 8)
-* **Framework**: Windows Forms (WinForms)
-* **Data Storage**: JSON (local storage)
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before getting started.
-
-1. Fork the repository.
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your changes.
-4. Push to the branch.
-5. Open a Pull Request.
+*   **Language**: C# (.NET 8)
+*   **Framework**: Windows Forms (WinForms)
+*   **Updates**: [Velopack](https://velopack.io/)
+*   **Data Storage**: JSON (local storage)
 
 ---
 
 ## 📄 License
 
-**ALL Copyright (c) 2026 nRn World (Robin Ayzit)**
+**Copyright (c) 2026 nRn World (Robin Ayzit)**
 
-This project is licensed under a strict **Non-Commercial License**. Commercial use, redistribution for profit, or use by companies is prohibited without a purchased license. See the [LICENSE](LICENSE) file for the full legal text.
+Licensed under a strict **Non-Commercial License**. Commercial use, redistribution for profit, or use by companies is prohibited without a purchased license.
 
 ---
 
-👨‍💻 **Author** **nRn World (Robin Ayzit)** 📧 [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)
+👨‍💻 **Author**: **nRn World (Robin Ayzit)**  
+📧 **Contact**: [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)  
+⭐ **Support**: If you like this project, consider giving it a star on GitHub!
 
-## 🙏 Support
-
-If you like this project, consider:
-* ⭐ Star the project on GitHub
-* ☕ [Buy me a coffee](https://buymeacoffee.com/nrnworld)
-* 📢 Share it with your friends
+[Buy me a coffee ☕](https://buymeacoffee.com/nrnworld)
