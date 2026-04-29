@@ -101,9 +101,9 @@ Windows Smart Taskbar features a built-in update system powered by **Velopack**:
 
 ## 📄 License
 
-**Copyright (c) 2026 nRn World (Robin Ayzit)**
+Creative Commons Attribution-NonCommercial 4.0 International Public License
 
-Licensed under a strict **Non-Commercial License**. Commercial use, redistribution for profit, or use by companies is prohibited without a purchased license.
+Copyright (c) 2026 WindowsSmartTaskbar
 
 ---
 
