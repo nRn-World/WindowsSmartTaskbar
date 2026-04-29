@@ -58,8 +58,6 @@ namespace WindowsSmartTaskbar
                     }
                 }
 
-                File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
-
                 var source = new GithubSource("https://github.com/nRn-World/WindowsSmartTaskbar", string.Empty, false);
                 var manager = new UpdateManager(source);
                 
@@ -67,6 +65,9 @@ namespace WindowsSmartTaskbar
                     var newVersion = await manager.CheckForUpdatesAsync();
                     if (newVersion != null) {
                         await manager.DownloadUpdatesAsync(newVersion);
+                        File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
+                    } else {
+                        File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
                     }
                 }
             } catch { }
