@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using System.Threading;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using System.Linq;
 using Velopack;
 using Velopack.Sources;
 
@@ -49,28 +50,42 @@ namespace WindowsSmartTaskbar
 
         static async Task CheckForUpdatesAsync()
         {
-            try {
-                if (!Directory.Exists(AppDataFolder)) Directory.CreateDirectory(AppDataFolder);
-                
-                if (File.Exists(LastUpdateCheckFile)) {
-                    if (DateTime.TryParse(File.ReadAllText(LastUpdateCheckFile), out DateTime lastCheck)) {
-                        if ((DateTime.Now - lastCheck).TotalDays < 7) return;
-                    }
-                }
-
-                var source = new GithubSource("https://github.com/nRn-World/WindowsSmartTaskbar", string.Empty, false);
-                var manager = new UpdateManager(source);
-                
-                if (manager.IsInstalled) {
-                    var newVersion = await manager.CheckForUpdatesAsync();
-                    if (newVersion != null) {
-                        await manager.DownloadUpdatesAsync(newVersion);
-                        File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
+            while (true)
+            {
+                try {
+                    if (!Directory.Exists(AppDataFolder)) Directory.CreateDirectory(AppDataFolder);
+                    
+                    bool shouldCheck = false;
+                    if (File.Exists(LastUpdateCheckFile)) {
+                        if (DateTime.TryParse(File.ReadAllText(LastUpdateCheckFile), out DateTime lastCheck)) {
+                            if ((DateTime.Now - lastCheck).TotalDays >= 7) shouldCheck = true;
+                        } else {
+                            shouldCheck = true;
+                        }
                     } else {
-                        File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
+                        shouldCheck = true;
                     }
-                }
-            } catch { }
+
+                    if (shouldCheck) {
+                        var source = new GithubSource("https://github.com/nRn-World/WindowsSmartTaskbar", string.Empty, false);
+                        var manager = new UpdateManager(source);
+                        
+                        if (manager.IsInstalled) {
+                            var newVersion = await manager.CheckForUpdatesAsync();
+                            if (newVersion != null) {
+                                await manager.DownloadUpdatesAsync(newVersion);
+                                File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
+                                string[] args = Environment.GetCommandLineArgs().Skip(1).ToArray();
+                                manager.ApplyUpdatesAndRestart(newVersion, args);
+                            } else {
+                                File.WriteAllText(LastUpdateCheckFile, DateTime.Now.ToString());
+                            }
+                        }
+                    }
+                } catch { }
+
+                await Task.Delay(TimeSpan.FromHours(12));
+            }
         }
     }
 }
