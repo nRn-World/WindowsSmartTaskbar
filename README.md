@@ -111,4 +111,4 @@ Copyright (c) 2026 WindowsSmartTaskbar
 📧 **Contact**: [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)  
 ⭐ **Support**: If you like this project, consider giving it a star on GitHub!
 
-[Support on Ko-fi ☕](https://ko-fi.com/nrnworld)
+☕ **Support development**: [Buy me a coffee 💜](https://ko-fi.com/nrnworld)
