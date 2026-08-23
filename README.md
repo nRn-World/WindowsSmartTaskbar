@@ -112,3 +112,5 @@ Copyright (c) 2026 WindowsSmartTaskbar
 ⭐ **Support**: If you like this project, consider giving it a star on GitHub!
 
 ☕ **Support development**: [Buy me a coffee 💜](https://ko-fi.com/nrnworld)
+
+Created by ❤️ © nRn World
